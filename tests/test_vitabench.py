@@ -175,6 +175,53 @@ def test_hard_hotel_brand_preference_blocks_wrong_brand():
     assert {v.code for v in violations} == {"preference_conflict"}
 
 
+def test_new_unpaid_order_is_paid_by_the_guard_before_the_next_llm_turn(monkeypatch):
+    pytest.importorskip("vita.data_model.message")
+    from vita.data_model.message import ToolMessage
+    agent, memory, calls = _upstream_agent(monkeypatch, [])
+    observation = ToolMessage(
+        role="tool", id="create1", name="create_delivery_order",
+        content="Order(order_id:o1, order_type:delivery, user_id:u1, store_id:s1, total_price:25.0, status:unpaid, products:[])")
+    result, _ = agent.generate_next_message(observation, agent.get_init_state())
+    assert calls == []
+    assert [call.name for call in result.tool_calls] == ["pay_delivery_order"]
+    assert result.tool_calls[0].arguments == {"order_id": "o1"}
+    memory.close()
+
+
+def test_payment_authorization_executes_observed_unpaid_order_without_llm(monkeypatch):
+    pytest.importorskip("vita.data_model.message")
+    from vita.data_model.message import UserMessage
+    agent, memory, calls = _upstream_agent(monkeypatch, [])
+    agent.observed_facts.observe(
+        "create_delivery_order",
+        "Order(order_id:o1, order_type:delivery, user_id:u1, store_id:s1, total_price:25.0, status:unpaid, products:[])",
+        "create1")
+    result, _ = agent.generate_next_message(UserMessage(role="user", content="好的，支付吧"), agent.get_init_state())
+    assert calls == []
+    assert [call.name for call in result.tool_calls] == ["pay_delivery_order"]
+    assert result.tool_calls[0].arguments == {"order_id": "o1"}
+    memory.close()
+
+
+def test_hard_hotel_feature_preference_blocks_missing_bathtub():
+    from vita_agent.guards import ConstraintChecker
+    from vita_agent.official_facts import get_official_specs
+    from vita_agent.models import Preference
+    facts = ObservedFacts()
+    hotel = HOTEL.replace("hotel_name=Hotel,", "hotel_name=速8酒店,").replace(
+        "tags=[]", "tags=['经济型', '连锁酒店', '停车场']")
+    facts.observe("get_ota_hotel_info", hotel, "hotel-detail")
+    resolved = facts.resolve(Action("create_hotel_order", {"hotel_id": "h1", "room_id": "r1"}, "id"))
+    assert "bathtub" not in resolved["hotel_features"]
+    pref = Preference("p1", "u1", "ota", "hotel_feature.bathtub", True, "hard", "eq",
+                      "user-message-1", "房间要带浴缸", 1)
+    violations = ConstraintChecker(get_official_specs(), unknown_policy="warn").check(
+        Action("create_hotel_order", {"hotel_id": "h1", "room_id": "r1", "user_id": "u1"}, "id"),
+        [pref], resolved)
+    assert {v.code for v in violations} == {"preference_conflict"}
+
+
 def test_completion_claim_is_blocked_while_an_order_is_unpaid(monkeypatch):
     pytest.importorskip("vita.data_model.message")
     from vita.data_model.message import AssistantMessage, UserMessage
@@ -241,10 +288,15 @@ def _upstream_agent(monkeypatch, drafts, budget=30, max_regenerations=2, **optio
     def cancel_delivery_order(order_id: str) -> str:
         raise AssertionError("Unsupported tools must not execute")
 
+    @is_tool(ToolType.WRITE)
+    def pay_delivery_order(order_id: str) -> str:
+        raise AssertionError("Guard must not execute tools")
+
     memory = StructuredPreferenceMemory(user_id="u1")
     memory.update([interaction(f"我的预算是{budget}元")])
     cls = make_guarded_agent_class()
-    agent = cls(tools=[as_tool(get_delivery_product_info), as_tool(create_delivery_order), as_tool(cancel_delivery_order)],
+    agent = cls(tools=[as_tool(get_delivery_product_info), as_tool(create_delivery_order),
+                       as_tool(cancel_delivery_order), as_tool(pay_delivery_order)],
                 domain_policy="Serve the user at {time}.", memory=memory, user_profile={"user_id": "u1"},
                 llm="mock", time="2026-07-01 12:00:00", max_regenerations=max_regenerations, **options)
     return agent, memory, calls

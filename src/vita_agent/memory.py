@@ -227,6 +227,28 @@ _HOTEL_BRANDS = {
 }
 
 
+_HOTEL_FEATURES = {
+    "经济型": "economy", "经济": "economy", "连锁酒店": "chain", "连锁": "chain",
+    "浴缸": "bathtub", "停车场": "parking", "停车": "parking",
+    "充电车位": "charging_parking", "充电": "charging_parking",
+    "电话叫醒": "phone_wakeup", "叫醒服务": "phone_wakeup",
+    "wifi": "wifi", "无线网络": "wifi", "泳池": "pool", "健身房": "gym",
+}
+
+
+HOTEL_FEATURE_TOKENS = frozenset(_HOTEL_FEATURES.values())
+
+
+def normalize_hotel_features(tags) -> list[str]:
+    values = []
+    for tag in tags or []:
+        text = str(tag).casefold()
+        for name in sorted(_HOTEL_FEATURES, key=len, reverse=True):
+            if name.casefold() in text and _HOTEL_FEATURES[name] not in values:
+                values.append(_HOTEL_FEATURES[name])
+    return values
+
+
 def normalize_hotel_brand(text: str) -> str:
     """Map a hotel name to a stable brand token, preferring the longest match."""
     if not isinstance(text, str) or not text.strip():
@@ -365,4 +387,15 @@ def extract_preferences(evidence: Evidence, domain: str = "global") -> list[dict
             items["hotel_amenities"] = {"domain": domain, "slot": "hotel_amenities",
                 "value": ["phone_wakeup"], "strength": "hard" if explicit else "soft",
                 "operator": "includes", "quote": clause}
+        features = normalize_hotel_features([clause])
+        if features:
+            negative = bool(re.search(r"不要|不需要|不用|没有|别|避免|住腻", clause))
+            explicit = bool(re.search(r"要|必须|需要|带|选|要求|一定|以后", clause))
+            # Each feature is its own slot so "带浴缸" cannot supersede
+            # "连锁酒店" merely because both appear in hotel tags.
+            for feature in features:
+                items[f"hotel_feature.{feature}"] = {
+                    "domain": domain, "slot": f"hotel_feature.{feature}",
+                    "value": not negative, "strength": "hard" if explicit else "soft",
+                    "operator": "eq", "quote": clause}
     return list(items.values())

@@ -12,8 +12,9 @@
 - 实现从训练失败轨迹离线提炼技能、开发集效用淘汰和 SHA-256 冻结；LLM 反思 v2 快照已接入统一只读加载器和实验计划校验。
 - 实现共享额度账本：支持货币、免费请求数和供应商积分三种模式；免费模式拒绝 0 单价伪造，遇到 402/429/额度耗尽立即 halt，训练/开发/测试/反思共用上限。
 - 完成真实训练集短前缀诊断：1 个训练用户 × 2 子任务；旧 DeepSeek 的 baseline/harness 与 OpenCode Go `deepseek-v4.1-flash` 的 baseline/harness/memory 均为 **0.0**；定位到高 GI 外卖、错误酒店品牌、memory 品牌改善但服务/支付约束未满足，未发现评分器缺陷。**未声称性能提升。**
-- 针对真实 0 分完成一轮代码修正：官方 CGL 未知事实 fail-open、明确违反仍拦截；补充酒店品牌/电话叫醒事实检查和未支付订单完成拦截；预算按 variant 归因；新增回归测试。
-- 274 项测试通过；本地演示与官方固定版本/数据哈希校验通过；Go 三臂用 176/200 请求、估算 0.3084 USD；正式测试集评测和 skills/full 五组消融尚未完成（额度不足，需新计划）。
+- 针对真实 0 分完成一轮代码修正：官方 CGL 未知事实 fail-open、明确违反仍拦截；补充酒店品牌/电话叫醒/设施事实检查、未支付订单完成拦截和创建订单后自动支付；预算按 variant 归因；新增回归测试。
+- 在 1 个 dev 用户 × 2 子任务上完成 P0 smoke：baseline/harness/memory 仍均 0.0，但不再 max_steps；baseline/harness 选到带浴缸房型但未支付，memory 外卖非方便面但 26 分钟。未声称提升。
+- 278 项测试通过；本地演示与官方固定版本/数据哈希校验通过；Go 三臂用 176/200 请求、估算 0.3084 USD；正式测试集评测和 skills/full 五组消融尚未完成（额度不足，需新计划）。
 
 **可诚实写的能力关键词**：VitaBench 2.0、LLM Agent、执行前约束检查、结构化偏好记忆、证据引用、离线技能演化、可复现实验、配额/预算控制、Python、pytest。
 
@@ -27,8 +28,9 @@
 - Implemented offline skill distillation from failed training traces, development-set utility retirement and SHA-256 freezing; citation-checked v2 reflection snapshots load through the same read-only bank used by experiment plans.
 - Implemented a shared quota ledger for currency, free request counts and provider credits; free mode rejects fabricated zero prices and halts immediately on 402/429/quota exhaustion across train/dev/test/reflection.
 - Ran real training-prefix diagnostics (1 user × 2 subtasks): DeepSeek baseline/harness and OpenCode Go `deepseek-v4.1-flash` baseline/harness/memory all scored 0.0; identified high-GI meal selection, wrong hotel brand, and a memory brand change that still missed service/payment constraints, with no evaluator-defect evidence. **No performance improvement is claimed.**
-- Followed the real zero-score diagnosis with a code-only correction pass: fail-open CGL for unknown facts, explicit violations still blocked, hotel brand/phone-wakeup facts, unpaid-order completion guard, and per-variant budget attribution, with regression tests.
-- 274 tests pass; pinned version/data checks and local demo pass; the Go three-arm run used 176/200 requests (~0.3084 USD estimate); formal held-out evaluation and the skills/full five-variant ablation remain unfinished (quota exhausted, new plan required).
+- Followed the real zero-score diagnosis with a code-only correction pass: fail-open CGL for unknown facts, explicit violations still blocked, hotel brand/phone-wakeup/feature facts, unpaid-order completion guard, automatic payment after order creation, and per-variant budget attribution, with regression tests.
+- Ran a P0 dev smoke on 1 user × 2 subtasks: baseline/harness/memory still scored 0.0 but no longer hit max_steps; baseline/harness selected a bathtub room but did not pay, while memory avoided instant noodles but took 26 minutes. No improvement is claimed.
+- 278 tests pass; pinned version/data checks and local demo pass; the Go three-arm run used 176/200 requests (~0.3084 USD estimate); formal held-out evaluation and the skills/full five-variant ablation remain unfinished (quota exhausted, new plan required).
 
 ## 不应写的内容
 

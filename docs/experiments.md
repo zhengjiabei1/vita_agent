@@ -4,7 +4,9 @@
 
 **2026-10-27 状态：** 免费模型 `deepseek-v4.1-flash-free` 在直接 API 上返回 HTTP 429 `FreeUsageLimitError`。经用户明确授权后，付费 OpenCode Go 端点 `https://opencode.ai/inference/go/openai/v1` 连通成功；它要求额外的 `x-opencode-session` 请求头。预检验证了工具调用、JSON、106,659 Token 长上下文和 usage。
 
-随后在新模型 `deepseek-v4.1-flash` 上完成 1 个训练用户 × 2 子任务的 baseline/harness/memory 各 1 trial，三臂均 **0.0**；共享 ledger 用 **176/200 请求**，估算 **0.30838665 USD**。真实结果、Token 和限制见 [reports/2026-10-27-go-train-prefix2](../reports/2026-10-27-go-train-prefix2/)。剩余 24 请求不足以完成有效 skills/full 五组消融；需要新额度并新建计划。免费额度阻塞记录见 [reports/2026-10-27-provider-quota](../reports/2026-10-27-provider-quota/)。
+随后在新模型 `deepseek-v4.1-flash` 上完成 1 个训练用户 × 2 子任务的 baseline/harness/memory 各 1 trial，三臂均 **0.0**；共享 ledger 用 **176/200 请求**，估算 **0.30838665 USD**。真实结果、Token 和限制见 [reports/2026-10-27-go-train-prefix2](../reports/2026-10-27-go-train-prefix2/)。
+
+P0 修正后又用新增额度跑了 1 个 dev 用户 × 2 子任务 × 三臂：仍全部 **0.0**，但都正常 `agent_stop`/`user_stop`，不再 `max_steps`；baseline/harness 选到带浴缸房型但未支付，memory 外卖非方便面但 26 分钟。两轮累计 **186/200 请求**、估算 **0.36331 USD**，剩余 14。见 [reports/2026-10-27-go-dev-p0-smoke](../reports/2026-10-27-go-dev-p0-smoke/)。剩余额度不足以完成有效 skills/full 五组消融；需要新额度并新建计划。免费额度阻塞记录见 [reports/2026-10-27-provider-quota](../reports/2026-10-27-provider-quota/)。
 
 默认比较 full-context baseline、full-context + harness、structured memory、full-context + frozen skills、structured memory + harness + frozen skills。结构化记忆的当前轮提取属于记忆模块的处理；baseline 保留官方 full-context 记忆。技能单独收益只用 `skills - baseline`，不能用 `full - baseline` 代替。
 

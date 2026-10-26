@@ -169,6 +169,18 @@ def test_explicit_phone_wakeup_amenity_is_hard_or_soft():
     assert soft["hotel_amenities"]["strength"] == "soft"
 
 
+def test_hotel_feature_requirements_are_grounded_and_can_be_negative():
+    positive = {item["slot"]: item for item in extract_preferences(
+        evidence(text="要经济型的连锁酒店，房间要带浴缸的哈"))}
+    assert {slot for slot in positive if slot.startswith("hotel_feature.")} == {
+        "hotel_feature.economy", "hotel_feature.chain", "hotel_feature.bathtub"}
+    assert all(item["strength"] == "hard" and item["value"] is True for item in positive.values())
+    negative = {item["slot"]: item for item in extract_preferences(
+        evidence(text="以后订酒店还是不要有浴缸的房间了吧"))}
+    assert negative["hotel_feature.bathtub"]["value"] is False
+    assert negative["hotel_feature.bathtub"]["strength"] == "hard"
+
+
 def test_later_hotel_brand_preference_supersedes_older_one():
     with PreferenceMemory() as memory:
         first = evidence("brand-1", "以后订酒店也只认准亚朵", 1)

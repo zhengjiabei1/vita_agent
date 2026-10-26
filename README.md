@@ -115,13 +115,14 @@ python scripts/run_experiments.py execute artifacts/free-train-prefix2-v2/plan.j
   --max-requests 3 --budget-ledger artifacts/free-shared.sqlite3
 ```
 
-截至 2026-10-27，已完成两轮真实训练集短前缀试验：
+截至 2026-10-27，已完成三轮真实短前缀试验：
 
 - 旧 DeepSeek：1 个训练用户、前 2 个子任务、baseline/harness 各 1 trial，两组均 **0.0**。
-- 新 OpenCode Go `deepseek-v4.1-flash`：同用户、同 2 子任务、baseline/harness/memory 各 1 trial，三臂均 **0.0**；update 子集均 0.0。baseline/harness 到 `max_steps`，memory `agent_stop`。memory 选到喜来登品牌，但仍缺电话叫醒、支付，外卖为鱼肉；总分没有提升。
+- 新 OpenCode Go `deepseek-v4.1-flash`：同用户、同 2 子任务、baseline/harness/memory 各 1 trial，三臂均 **0.0**；update 子集均 0.0。
+- P0 修正后的 Go dev smoke：1 个 dev 用户、前 2 个子任务、baseline/harness/memory 各 1 trial，三臂仍 **0.0**，但不再 `max_steps`；baseline/harness 选到带浴缸房型却未支付，memory 外卖非方便面但配送 26 分钟（要求 25 分钟内）。
 
-Go 实验用 **176/200 请求**、输入 1,828,931、输出 56,745 Token，按配置单价估算 **0.30838665 USD**；剩余 24 请求不足以完成有效的 skills/full 五组消融和保留测试。工具调用、JSON、106,659 Token 长上下文和 usage 已通过预检。
+Go 两轮累计 **186/200 请求**、输入 2,239,881、输出 45,541 Token，按配置单价估算 **0.36331 USD**；剩余 14 请求，不足以完成 skills/full 五组消融和保留测试。工具调用、JSON、106,659 Token 长上下文和 usage 已通过预检。
 
 这些都不是保留测试集成绩，也不能说明总体有效或无效。没有评分器缺陷证据，也没有证明任何模块收益。官方 `agent_cost` 聚合值缺失，成本增长率保持 `null`。
 
-当前成果适合描述为“实现并测试了上述机制，完成官方接口接入、新模型训练试跑和零分诊断”。简历中的提升数字仍无实验支持。验证记录见 [verification.md](docs/verification.md)，Go 结果见 [reports/2026-10-27-go-train-prefix2](reports/2026-10-27-go-train-prefix2/)，零分诊断见 [reports/2026-10-27-zero-score-diagnosis](reports/2026-10-27-zero-score-diagnosis/)，额度记录见 [reports/2026-10-27-provider-quota](reports/2026-10-27-provider-quota/)，继续开发见 [HANDOFF.md](HANDOFF.md)。
+当前成果适合描述为“实现并测试了上述机制，完成官方接口接入、新模型训练/dev 试跑和零分诊断”。简历中的提升数字仍无实验支持。验证记录见 [verification.md](docs/verification.md)，Go 训练结果见 [reports/2026-10-27-go-train-prefix2](reports/2026-10-27-go-train-prefix2/)，dev smoke 见 [reports/2026-10-27-go-dev-p0-smoke](reports/2026-10-27-go-dev-p0-smoke/)，零分诊断见 [reports/2026-10-27-zero-score-diagnosis](reports/2026-10-27-zero-score-diagnosis/)，额度记录见 [reports/2026-10-27-provider-quota](reports/2026-10-27-provider-quota/)，继续开发见 [HANDOFF.md](HANDOFF.md)。

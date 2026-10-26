@@ -1,0 +1,142 @@
+{
+  "schema_version": 1,
+  "status": "dev_smoke_only",
+  "scope": "1 dev user x first 2 subtasks x 1 trial per arm; NOT test",
+  "arms": [
+    {
+      "arm": "baseline",
+      "reward": 0.0,
+      "subtask_rewards": {
+        "subtask_0_reward": 0.0,
+        "subtask_1_reward": 0.0
+      },
+      "termination": "agent_stop",
+      "tool_errors": 0,
+      "message_usage": {
+        "prompt_tokens": 416298,
+        "completion_tokens": 1656
+      },
+      "delivery": {
+        "status": "paid",
+        "tags": [
+          "面食",
+          "清汤",
+          "日式",
+          "方便面"
+        ],
+        "price": 16.0
+      },
+      "hotel": [
+        {
+          "status": "unpaid",
+          "room_types": [
+            "经济大床房(带浴缸)"
+          ],
+          "price": 189.0
+        }
+      ]
+    },
+    {
+      "arm": "harness",
+      "reward": 0.0,
+      "subtask_rewards": {
+        "subtask_0_reward": 0.0,
+        "subtask_1_reward": 0.0
+      },
+      "termination": "agent_stop",
+      "tool_errors": 0,
+      "message_usage": {
+        "prompt_tokens": 386239,
+        "completion_tokens": 1580
+      },
+      "delivery": {
+        "status": "paid",
+        "tags": [
+          "面食",
+          "清汤",
+          "日式",
+          "方便面"
+        ],
+        "price": 16.0
+      },
+      "hotel": [
+        {
+          "status": "unpaid",
+          "room_types": [
+            "经济大床房(带浴缸)"
+          ],
+          "price": 189.0
+        }
+      ]
+    },
+    {
+      "arm": "memory",
+      "reward": 0.0,
+      "subtask_rewards": {
+        "subtask_0_reward": 0.0,
+        "subtask_1_reward": 0.0
+      },
+      "termination": "user_stop",
+      "tool_errors": 0,
+      "message_usage": {
+        "prompt_tokens": 149760,
+        "completion_tokens": 1391
+      },
+      "delivery": {
+        "status": "paid",
+        "tags": [
+          "面食",
+          "清汤",
+          "排骨"
+        ],
+        "price": 26.0
+      },
+      "hotel": [
+        {
+          "status": "unpaid",
+          "room_types": [
+            "精选大床房"
+          ],
+          "price": 179.0
+        }
+      ]
+    }
+  ],
+  "ledger": {
+    "requests": 186,
+    "limit": 200,
+    "remaining": 14,
+    "prompt_tokens": 2239881,
+    "completion_tokens": 45541,
+    "total_tokens": 2285422,
+    "measured_usd": 0.36330675,
+    "by_label": [
+      {
+        "label": "baseline",
+        "requests": 55,
+        "prompt_tokens": 900005,
+        "completion_tokens": 11597,
+        "total_tokens": 911602,
+        "measured": 0.14195895
+      },
+      {
+        "label": "harness",
+        "requests": 56,
+        "prompt_tokens": 896053,
+        "completion_tokens": 12391,
+        "total_tokens": 908444,
+        "measured": 0.14184255
+      },
+      {
+        "label": "memory",
+        "requests": 75,
+        "prompt_tokens": 443823,
+        "completion_tokens": 21553,
+        "total_tokens": 465376,
+        "measured": 0.07950525
+      }
+    ],
+    "note": "Configured OpenCode list-price estimate; not an invoice."
+  },
+  "user_hash": "4b6e6a280736"
+}

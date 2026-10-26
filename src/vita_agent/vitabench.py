@@ -14,7 +14,8 @@ import os
 import re
 from uuid import uuid4
 
-from .memory import PreferenceMemory, extract_preferences, normalize_hotel_brand
+from .memory import (PreferenceMemory, extract_preferences, normalize_hotel_brand,
+                     normalize_hotel_features, HOTEL_FEATURE_TOKENS)
 from .models import Action, Evidence, Violation
 from .interactions import interaction_evidence
 from .semantic_memory import EvidenceExtractor, EvidenceHistory
@@ -204,18 +205,24 @@ class ObservedFacts:
             tag_block = re.search(r"tags=\[([^\]]*)\]", content.split(", products=")[0])
             hotel_tags = re.findall(r"'([^']*)'", tag_block[1]) if tag_block else []
             amenities = ["phone_wakeup"] if any("电话叫醒" in tag for tag in hotel_tags) else []
+            features = normalize_hotel_features(hotel_tags)
             pattern = rf"HotelProduct\(room_type=([^,\n]+), date=(\d{{4}}-\d{{2}}-\d{{2}}), price=({_NUMBER}), quantity=({_NUMBER}), room_id=({_ID})\)"
             for match in re.finditer(pattern, content):
                 room_type, date, price, quantity, room_id = match.groups()
                 if math.isfinite(float(price)) and math.isfinite(float(quantity)):
-                    self.rooms[(header[1], room_id)] = {
+                    room_features = sorted(set(features) | set(normalize_hotel_features([room_type])))
+                    facts = {
                         "total_price": float(price), "available": float(quantity) > 0,
                         "date": date, "room_type": room_type,
                         "hotel_name": header[2], "hotel_tags": hotel_tags,
                         "hotel_brand": normalize_hotel_brand(header[2]),
+                        "hotel_features": room_features,
                         "hotel_amenities": amenities,
                         "_evidence_id": evidence_id,
                     }
+                    for feature in HOTEL_FEATURE_TOKENS:
+                        facts[f"hotel_feature.{feature}"] = feature in room_features
+                    self.rooms[(header[1], room_id)] = facts
         elif name in ("create_delivery_order", "create_hotel_order"):
             expected_type = "delivery" if name == "create_delivery_order" else "hotel"
             header = re.match(rf"Order\(order_id:({_ID}), order_type:({expected_type}), user_id:({_ID}),", content)
@@ -268,7 +275,7 @@ class ObservedFacts:
 def make_guarded_agent_class():
     """Build the optional actual upstream subclass only when VitaBench is installed."""
     from vita.agent.personalization_agent import PersonalizationAgent
-    from vita.data_model.message import AssistantMessage, MultiToolMessage, SystemMessage
+    from vita.data_model.message import AssistantMessage, MultiToolMessage, SystemMessage, ToolCall
     from vita.utils.llm_utils import generate
     from .guards import ConstraintChecker, ToolSpec
     from .official_facts import OfficialObservedFacts, get_official_specs, ignores_purchase_preferences
@@ -298,9 +305,17 @@ def make_guarded_agent_class():
             self._current_constraints = PreferenceMemory()
             self._configure_checker()
 
-        def _unpaid_orders(self):
-            return [order for order in self.observed_facts.orders.values()
+        def _unpaid_order_items(self):
+            return [(order_id, order) for order_id, order in self.observed_facts.orders.items()
                     if order.get("status") not in ("paid", "cancelled", "refunded")]
+
+        def _unpaid_orders(self):
+            return [order for _, order in self._unpaid_order_items()]
+
+        @staticmethod
+        def _payment_authorized(text):
+            return isinstance(text, str) and bool(re.search(
+                r"支付吧|现在支付|确认支付|去支付|帮我支付|付款|支付成功", text))
 
         @staticmethod
         def _claims_completion(text):
@@ -387,6 +402,25 @@ def make_guarded_agent_class():
             state.messages.extend(incoming)
             # Refresh memory every turn, including preferences stated in this turn.
             state.system_messages = [SystemMessage(role="system", content=self.system_prompt)]
+            created = any(item.role == "tool" and not item.error
+                          and isinstance(item.name, str) and item.name.startswith("create_")
+                          for item in incoming)
+            if self.enable_guards and (created or any(
+                    self._payment_authorized(item.content) for item in incoming if item.role == "user")):
+                available = {tool.name for tool in self.tools}
+                calls = []
+                for order_id, order in self._unpaid_order_items():
+                    name = f"pay_{order.get('order_type')}_order"
+                    if name in available:
+                        calls.append(ToolCall(id="auto-pay-" + uuid4().hex, name=name,
+                                              arguments={"order_id": order_id}))
+                if calls:
+                    draft = AssistantMessage(role="assistant", tool_calls=calls, cost=0.0,
+                                             usage={"prompt_tokens": 0, "completion_tokens": 0})
+                    state.messages.append(draft)
+                    self._submitted_writes.update(json.dumps([call.name, call.arguments], sort_keys=True)
+                                                  for call in calls)
+                    return draft, state
             feedback = []
             cost = 0.0
             usage = {"prompt_tokens": 0, "completion_tokens": 0}
