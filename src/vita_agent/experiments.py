@@ -407,7 +407,8 @@ def run_worker(path: str | Path, variant: str) -> None:
     from .budget import install_budget_guard
     install_budget_guard(execution["budget_ledger"], limit=execution["budget"], currency=execution["currency"],
                          pricing_basis=execution["pricing_basis"], mode=execution.get("mode", "currency"),
-                         unit=execution.get("unit"), request_limit=execution.get("request_limit"))
+                         unit=execution.get("unit"), request_limit=execution.get("request_limit"),
+                         label=variant)
     os.chdir(plan["upstream"])
     import vita.run as upstream_run
     import vita.domains.personalization.environment as personalization

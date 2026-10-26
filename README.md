@@ -45,11 +45,11 @@ flowchart LR
 
 | 模块 | 实现 | 边界 |
 |---|---|---|
-| `harness.py` / `guards.py` | 校验预算、过敏原、日期、数量、库存、容量和必填字段；限制重生成；完整计入草稿成本；SQLite 幂等日志 | 事实由可信 resolver 提供；模型草稿不能自报价格作为证据；真实服务仍需原子校验和幂等支持 |
-| `memory.py` / `semantic_memory.py` | SQLite slot memory；引用和时间证据；supersede 覆盖链；可选 LLM 语义抽取和原始用户证据检索；明确正向的酒店品牌软偏好 | 未经确定性核实的语义硬约束降为候选；软偏好和原文回退采用词项检索，当前不是 embedding RAG；品牌规则覆盖很窄 |
+| `harness.py` / `guards.py` | 校验预算、过敏原、日期、数量、库存、容量和必填字段；官方适配器对未知事实 fail-open、对明确违反 fail-closed；检查酒店品牌/电话叫醒；未支付订单阻止“完成”声明；限制重生成；SQLite 幂等日志 | 事实由可信 resolver 提供；模型草稿不能自报价格作为证据；真实服务仍需原子校验和幂等支持 |
+| `memory.py` / `semantic_memory.py` | SQLite slot memory；引用和时间证据；supersede 覆盖链；可选 LLM 语义抽取和原始用户证据检索；酒店品牌（排他表达为 hard）与电话叫醒需求 | 未经确定性核实的语义硬约束降为候选；软偏好和原文回退采用词项检索，当前不是 embedding RAG；品牌/设施规则覆盖仍窄 |
 | `skills.py` / `skill_reflection.py` | 规则模板提炼、效用淘汰和 SHA-256 冻结；引用训练轨迹证据的 LLM 反思模块；v2 快照已接入统一加载器 | 尚未生成真实 v2 技能库或测得技能收益；没有 grounded 候选时不写快照；不从测试轨迹学习 |
 | `vitabench.py` / `official_facts.py` | 官方 `BaseMemory` 插件、受约束 Agent 子类；覆盖 30 个官方写工具的观察事实映射 | 必需事实缺失时拒绝；仅加载记忆插件不会启用执行检查；覆盖工具不代表所有业务规则完备 |
-| `experiments.py` / `budget.py` | 固定用户划分、实验计划哈希、五组消融入口、共享额度账本；支持货币、请求数和积分三种模式 | 免费模式不伪造单价；供应商 429/额度耗尽会 halt 共享 ledger；本地计数不能替代供应商额度 |
+| `experiments.py` / `budget.py` | 固定用户划分、实验计划哈希、五组消融入口、共享额度账本；支持货币、请求数和积分三种模式；按 variant 标记请求 | 免费模式不伪造单价；供应商 429/额度耗尽会 halt 共享 ledger；本地计数不能替代供应商额度 |
 | `evaluation.py` | 官方结果配对比较、偏好更新子集、按用户 bootstrap、成本变化 | 缺失 trial/分数拒绝比较；未知成本保留 `null` |
 
 ## 编程接口

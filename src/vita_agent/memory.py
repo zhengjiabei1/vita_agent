@@ -215,7 +215,8 @@ _CUISINES = {
     "indian": "indian", "mexican": "mexican", "korean": "korean", "french": "french",
 }
 _HOTEL_BRANDS = {
-    "喜来登": "sheraton", "万豪": "marriott", "万怡": "courtyard", "威斯汀": "westin",
+    "喜来登": "sheraton", "JW万豪": "jw_marriott", "万豪": "marriott",
+    "万怡": "courtyard", "威斯汀": "westin",
     "艾美": "le_meridien", "丽思卡尔顿": "ritz_carlton", "瑞吉": "st_regis",
     "希尔顿": "hilton", "凯悦": "hyatt", "洲际": "intercontinental",
     "香格里拉": "shangri_la", "雅高": "accor", "如家": "home_inn",
@@ -224,6 +225,17 @@ _HOTEL_BRANDS = {
     "sheraton": "sheraton", "marriott": "marriott", "hilton": "hilton",
     "hyatt": "hyatt", "intercontinental": "intercontinental",
 }
+
+
+def normalize_hotel_brand(text: str) -> str:
+    """Map a hotel name to a stable brand token, preferring the longest match."""
+    if not isinstance(text, str) or not text.strip():
+        return ""
+    folded = text.casefold()
+    for name in sorted(_HOTEL_BRANDS, key=len, reverse=True):
+        if name.casefold() in folded:
+            return _HOTEL_BRANDS[name]
+    return ""
 _BRAND_NEGATIVE = re.compile(
     r"一般|不太好|不好|差评|失望|不推荐|不会|不再|讨厌|隔音|态度|踩雷|住腻", re.I)
 _ALLERGENS = {
@@ -249,7 +261,7 @@ def _brand_pattern() -> str:
 _BRAND = _brand_pattern()
 
 
-def _hotel_brand(clause: str) -> tuple[str, str] | None:
+def _hotel_brand(clause: str) -> tuple[str, str, bool] | None:
     """Extract an explicit positive hotel-brand preference, not a mere mention."""
     if _BRAND_NEGATIVE.search(clause):
         return None
@@ -266,7 +278,8 @@ def _hotel_brand(clause: str) -> tuple[str, str] | None:
     if not matches:
         return None
     _, name, quote = max(matches)
-    return _HOTEL_BRANDS[name.casefold() if name.isascii() else name], quote
+    hard = bool(re.search(r"只认准|只住|只选|以后都|必须|只考虑", clause))
+    return _HOTEL_BRANDS[name.casefold() if name.isascii() else name], quote, hard
 
 
 def _unquoted(text: str) -> str:
@@ -343,8 +356,13 @@ def extract_preferences(evidence: Evidence, domain: str = "global") -> list[dict
                     break
         brand = _hotel_brand(clause)
         if brand:
-            # Brand loyalty is a soft preference: it guides retrieval, but it
-            # cannot replace a trusted constraint or a current hard requirement.
+            # Explicit exclusivity ("only", "must") is a hard brand constraint;
+            # ordinary liking remains a soft preference.
             items["hotel_brand"] = {"domain": domain, "slot": "hotel_brand", "value": brand[0],
-                "strength": "soft", "operator": "eq", "quote": brand[1]}
+                "strength": "hard" if brand[2] else "soft", "operator": "eq", "quote": brand[1]}
+        if re.search(r"电话叫醒|叫醒服务", clause) and not re.search(r"不需要|不用|不要|没有", clause):
+            explicit = bool(re.search(r"必须|需要|要有|要求|一定", clause))
+            items["hotel_amenities"] = {"domain": domain, "slot": "hotel_amenities",
+                "value": ["phone_wakeup"], "strength": "hard" if explicit else "soft",
+                "operator": "includes", "quote": clause}
     return list(items.values())

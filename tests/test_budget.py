@@ -311,6 +311,17 @@ def test_installer_free_mode_reports_zero_cash_without_fake_tariff(monkeypatch, 
     assert ledger.summary()["held_requests"] == 0
 
 
+def test_ledger_labels_attribute_requests_to_variants(tmp_path):
+    ledger = BudgetLedger(tmp_path / "labels.db", limit=10, currency="USD")
+    first = ledger.reserve("model", 1000, 100, 2, 8, label="baseline")
+    second = ledger.reserve("model", 1000, 100, 2, 8, label="memory")
+    ledger.settle(first.id, {"prompt_tokens": 100, "completion_tokens": 10})
+    ledger.settle(second.id, {"prompt_tokens": 200, "completion_tokens": 20})
+    by_label = {row["label"]: row for row in ledger.summary()["by_label"]}
+    assert by_label["baseline"]["requests"] == 1 and by_label["baseline"]["prompt_tokens"] == 100
+    assert by_label["memory"]["requests"] == 1 and by_label["memory"]["completion_tokens"] == 20
+
+
 def test_request_limit_caps_paid_calls_and_is_immutable(tmp_path):
     path = tmp_path / "paid.db"
     ledger = BudgetLedger(path, limit=100, currency="USD", request_limit=2)

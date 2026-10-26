@@ -14,7 +14,7 @@ import os
 import re
 from uuid import uuid4
 
-from .memory import PreferenceMemory, extract_preferences
+from .memory import PreferenceMemory, extract_preferences, normalize_hotel_brand
 from .models import Action, Evidence, Violation
 from .interactions import interaction_evidence
 from .semantic_memory import EvidenceExtractor, EvidenceHistory
@@ -160,18 +160,31 @@ class ObservedFacts:
 
     def __init__(self):
         self.products: dict[str, dict] = {}
+        self.stores: dict[str, dict] = {}
         self.rooms: dict[tuple[str, str], dict] = {}
         self.orders: dict[str, dict] = {}
 
     def clear(self):
         self.products.clear()
+        self.stores.clear()
         self.rooms.clear()
         self.orders.clear()
 
     def observe(self, name: str, content: str, evidence_id: str, error: bool = False):
         if error or not isinstance(content, str):
             return
-        if name == "get_delivery_product_info":
+        if name == "get_delivery_store_info":
+            header = re.match(rf"Store\(name=([^,]+), store_id=({_ID}), score=({_NUMBER}),", content)
+            if header:
+                tag_block = re.search(r"tags=\[([^\]]*)\]", content.split(", products=")[0])
+                tags = re.findall(r"'([^']*)'", tag_block[1]) if tag_block else []
+                minutes = re.search(r"配送约(\d+)分钟", " ".join(tags))
+                self.stores[header[2]] = {
+                    "store_name": header[1], "store_score": float(header[3]),
+                    "store_tags": tags, "delivery_minutes": int(minutes[1]) if minutes else None,
+                    "_evidence_id": evidence_id,
+                }
+        elif name == "get_delivery_product_info":
             # Anchor known fixed fields; reject ambiguous injected field markers.
             required = ("store_id=", "product_id=", "quantity=", "price=")
             if not content.startswith("StoreProduct(") or any(content.count(k) != 1 for k in required):
@@ -185,22 +198,33 @@ class ObservedFacts:
                     self.products[product[1]] = {"store_id": store[1], "quantity": quantity,
                         "price": price, "_evidence_id": evidence_id}
         elif name == "get_ota_hotel_info":
-            header = re.match(rf"Hotel Info:\nHotel\(hotel_id=({_ID}), hotel_name=", content)
+            header = re.match(rf"Hotel Info:\nHotel\(hotel_id=({_ID}), hotel_name=([^,\n]+),", content)
             if not header or content.count("hotel_id=") != 1:
                 return
-            pattern = rf"HotelProduct\(room_type=[^\n]*?, date=(\d{{4}}-\d{{2}}-\d{{2}}), price=({_NUMBER}), quantity=({_NUMBER}), room_id=({_ID})\)"
+            tag_block = re.search(r"tags=\[([^\]]*)\]", content.split(", products=")[0])
+            hotel_tags = re.findall(r"'([^']*)'", tag_block[1]) if tag_block else []
+            amenities = ["phone_wakeup"] if any("电话叫醒" in tag for tag in hotel_tags) else []
+            pattern = rf"HotelProduct\(room_type=([^,\n]+), date=(\d{{4}}-\d{{2}}-\d{{2}}), price=({_NUMBER}), quantity=({_NUMBER}), room_id=({_ID})\)"
             for match in re.finditer(pattern, content):
-                date, price, quantity, room_id = match.groups()
+                room_type, date, price, quantity, room_id = match.groups()
                 if math.isfinite(float(price)) and math.isfinite(float(quantity)):
-                    self.rooms[(header[1], room_id)] = {"total_price": float(price),
-                        "available": float(quantity) > 0, "date": date, "_evidence_id": evidence_id}
+                    self.rooms[(header[1], room_id)] = {
+                        "total_price": float(price), "available": float(quantity) > 0,
+                        "date": date, "room_type": room_type,
+                        "hotel_name": header[2], "hotel_tags": hotel_tags,
+                        "hotel_brand": normalize_hotel_brand(header[2]),
+                        "hotel_amenities": amenities,
+                        "_evidence_id": evidence_id,
+                    }
         elif name in ("create_delivery_order", "create_hotel_order"):
             expected_type = "delivery" if name == "create_delivery_order" else "hotel"
             header = re.match(rf"Order\(order_id:({_ID}), order_type:({expected_type}), user_id:({_ID}),", content)
             prices = re.findall(rf"(?:^|, )total_price:({_NUMBER}),", content)
+            status = re.search(r", status:([A-Za-z_]+),", content)
             if header and len(prices) == 1 and math.isfinite(float(prices[0])):
                 self.orders[header[1]] = {"total_price": float(prices[0]), "available": True,
-                    "user_id": header[3], "order_type": header[2], "_evidence_id": evidence_id}
+                    "user_id": header[3], "order_type": header[2],
+                    "status": status[1] if status else "unknown", "_evidence_id": evidence_id}
             # Inventory observations become stale after any attempted creation.
             self.products.clear()
             self.rooms.clear()
@@ -220,9 +244,14 @@ class ObservedFacts:
             products = [self.products.get(item) for item in ids]
             if any(not product or product["store_id"] != args.get("store_id") for product in products):
                 return {}
-            return {"total_price": sum(p["price"] * n for p, n in zip(products, counts)),
-                    "available": all(p["quantity"] >= n for p, n in zip(products, counts)),
-                    "_evidence_id": ",".join(p["_evidence_id"] for p in products)}
+            facts = {"total_price": sum(p["price"] * n for p, n in zip(products, counts)),
+                     "available": all(p["quantity"] >= n for p, n in zip(products, counts)),
+                     "_evidence_id": ",".join(p["_evidence_id"] for p in products)}
+            store = self.stores.get(args.get("store_id"), {})
+            for key in ("store_name", "store_score", "store_tags", "delivery_minutes"):
+                if key in store and store[key] is not None:
+                    facts[key] = store[key]
+            return facts
         if action.tool == "create_hotel_order":
             if not all(isinstance(args.get(k), str) for k in ("hotel_id", "room_id")):
                 return {}
@@ -269,6 +298,18 @@ def make_guarded_agent_class():
             self._current_constraints = PreferenceMemory()
             self._configure_checker()
 
+        def _unpaid_orders(self):
+            return [order for order in self.observed_facts.orders.values()
+                    if order.get("status") not in ("paid", "cancelled", "refunded")]
+
+        @staticmethod
+        def _claims_completion(text):
+            if not isinstance(text, str):
+                return False
+            return bool(re.search(
+                r"已完成|都订好|都安排|搞定|支付成功|已支付|没有其他|祝您|祝旅途|安排妥当|已确认|###STOP###",
+                text))
+
         @property
         def system_prompt(self):
             prompt = super().system_prompt
@@ -279,6 +320,9 @@ def make_guarded_agent_class():
                 if skills:
                     prompt += ("\n\nReusable procedural guidance, subordinate to current evidence and hard constraints:\n"
                                + "\n".join("- " + skill.lesson for skill in skills))
+            if self._unpaid_orders():
+                prompt += ("\n\nRuntime state: there are unpaid orders in this subtask. "
+                           "Do not claim the task is complete; pay them or ask the user before finishing.")
             return prompt
 
         def _configure_checker(self):
@@ -290,7 +334,11 @@ def make_guarded_agent_class():
                     required = tuple(tool.openai_schema.get("function", {}).get("parameters", {}).get("required", ()))
                     specs[tool.name] = ToolSpec(required, read_only=True)
             self._specs = specs
-            self.checker = ConstraintChecker(specs)
+            # Official observations are incomplete by design. Parsing failures
+            # must fall back to baseline behavior instead of blocking a valid
+            # write forever; explicit parsed violations still fail closed.
+            unknown_policy = os.environ.get("VITA_CGL_UNKNOWN_POLICY", "warn")
+            self.checker = ConstraintChecker(specs, unknown_policy=unknown_policy)
             domains = {spec.domain for name, spec in specs.items()
                        if name in {t.name for t in self.tools} and spec.domain}
             self._domain = next(iter(domains)) if len(domains) == 1 else None
@@ -406,6 +454,9 @@ def make_guarded_agent_class():
                                 violations.append(Violation("invalid_dates", "Observed product date is invalid"))
                 if writes and len(draft.tool_calls or []) > 1:
                     violations.append(Violation("multiple_mutations", "Emit one write call per turn after observing its inputs"))
+                if not draft.tool_calls and self._unpaid_orders() and self._claims_completion(draft.content):
+                    violations.append(Violation(
+                        "unpaid_order", "The draft claims completion while an observed order is still unpaid"))
                 if not violations:
                     self._submitted_writes.update(write_signatures)
                     draft.cost, draft.usage = cost, usage

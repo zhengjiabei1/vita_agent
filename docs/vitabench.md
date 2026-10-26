@@ -57,9 +57,9 @@ vita run --domain personalization \
 
 每次官方任务 / trial 默认新建独立的内存 SQLite 数据库。即使用户 ID 相同，不同实例也不共享状态；缺失用户 ID 时生成实例 ID。需要落盘时显式传入 `path`，并为不同实验 / trial 使用独立路径。
 
-偏好抽取支持 `VITA_MEMORY_EXTRACTION=rules|llm`。直接加载插件默认使用保守规则，实验 runner 的计划默认使用 `llm`，并将选择写入计划。规则覆盖明确的总预算、食物过敏、已知菜系偏好，以及明确正向的酒店品牌偏好（`hotel_brand`，软偏好）；语义抽取要求原文引用和 schema 合法，无法由确定性规则核实的硬约束降为候选，不能仅凭模型断言执行硬拦截。原始用户证据同时保存在独立历史库，按词项检索回退；全部被覆盖的旧证据不会重新注入。硬约束完整注入，软偏好做分层词法检索。没有使用官方 oracle 记忆，也不从订单行为自动推断硬约束。
+偏好抽取支持 `VITA_MEMORY_EXTRACTION=rules|llm`。直接加载插件默认使用保守规则，实验 runner 的计划默认使用 `llm`，并将选择写入计划。规则覆盖明确的总预算、食物过敏、已知菜系偏好、明确正向的酒店品牌偏好（`hotel_brand`）和明确的电话叫醒需求（`hotel_amenities`）。包含“只认准/只住/必须”等排他/强制表达的品牌偏好记为 hard；普通喜欢记为 soft。语义抽取要求原文引用和 schema 合法，无法由确定性规则核实的硬约束降为候选，不能仅凭模型断言执行硬拦截。原始用户证据同时保存在独立历史库，按词项检索回退；全部被覆盖的旧证据不会重新注入。硬约束完整注入，软偏好做分层词法检索。没有使用官方 oracle 记忆，也不从订单行为自动推断硬约束。
 
-训练集审计解析了 10,004 条交互记录，无解析错误；27,762 条去重用户原话中，加入品牌规则后规则抽取命中 18 条（17 条 `hotel_brand`、1 条 `total_price`），此前仅 1 条。这是抽取覆盖统计，不是 gold 偏好召回率，也不是效果提升。带证据的语义抽取已实现，但还没有真实 memory 消融成绩。
+训练集审计解析了 10,004 条交互记录，无解析错误；27,762 条去重用户原话中，加入品牌规则后规则抽取命中 18 条（17 条 `hotel_brand`、1 条 `total_price`），此前仅 1 条；电话叫醒规则单独统计。这是抽取覆盖统计，不是 gold 偏好召回率，也不是效果提升。带证据的语义抽取已实现，但还没有真实 memory 消融成绩。
 
 ## 启用 draft–check–regenerate 和冻结技能
 
@@ -78,6 +78,8 @@ python scripts/run_experiments.py check artifacts/smoke-v1/plan.json
 计划与检查不调用模型；显式执行和共享预算方式见 [experiments.md](experiments.md)。旧 `scripts/run_vitabench.py` 是低层接入示例，不提供完整实验入口的预算及脱敏保证，不能用它绕过这些保护。
 
 `make_guarded_agent_class()` 返回真正继承官方 `PersonalizationAgent` 的类。每次生成的工具调用先检查，再返回给官方 orchestrator 执行。失败草案不执行，也不加入已执行的对话历史；校验反馈交给模型重生成，默认最多重生成两次。超限后返回未执行说明。所有生成尝试的 token 和 cost 累加至最终消息；任一尝试缺少 cost / usage 时保留 `None`，不将未知成本伪装为零。
+
+官方适配器的 CGL 使用 `VITA_CGL_UNKNOWN_POLICY=warn`（默认）：**无法解析/没有可信事实时退回基线行为，只有明确解析出的违反才 BLOCK**。核心 `GuardedHarness` 仍默认 strict，供本地受控场景使用。这样避免“事实缺失”被误当成“违反约束”而无限重生成。酒店观察会解析 `hotel_name/tags`，支持 hard `hotel_brand` 和 `hotel_amenities`（电话叫醒）检查；创建订单会记录 `status`，当草案声称完成但仍有未支付订单时触发 `unpaid_order` 重生成。
 
 可设置 `VITA_SKILL_BANK=/absolute/path/frozen-skills.json` 加载已冻结技能；实验 runner 用 `--skill-bank` 指定。只向 prompt 注入经过 schema 和 SHA-256 校验的 `lesson`，不注入来源用户 / task / trace 标识。评测进程只有只读 `FrozenSkillBank`，不蒸馏评测轨迹、不更新效用。
 

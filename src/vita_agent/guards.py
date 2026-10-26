@@ -134,7 +134,11 @@ def _satisfies(actual: Any, expected: Any, operator: str) -> bool:
 class ConstraintChecker:
     """Validate a known proposal using trusted candidate evidence and preferences."""
 
-    def __init__(self, tool_specs: Mapping[str, ToolSpec] | None = None) -> None:
+    def __init__(self, tool_specs: Mapping[str, ToolSpec] | None = None, *,
+                 unknown_policy: str = "strict") -> None:
+        if unknown_policy not in ("strict", "warn"):
+            raise ValueError("unknown_policy must be strict or warn")
+        self.unknown_policy = unknown_policy
         self.tool_specs = dict(DEFAULT_TOOL_SPECS)
         if tool_specs is not None:
             for name, spec in tool_specs.items():
@@ -201,19 +205,24 @@ class ConstraintChecker:
         if not isinstance(action.idempotency_key, str) or not action.idempotency_key.strip():
             violations.append(Violation("missing_argument", "Mutating actions require an idempotency key", "idempotency_key"))
         if not isinstance(facts, dict):
-            return violations + [Violation("missing_evidence", "Trusted candidate evidence must be an object")]
+            if self.unknown_policy == "strict":
+                violations.append(Violation("missing_evidence", "Trusted candidate evidence must be an object"))
+            return violations
         evidence_id = facts.get("_evidence_id")
         if not isinstance(evidence_id, str) or not evidence_id.strip():
-            violations.append(Violation("missing_evidence", "Trusted candidate evidence needs a provenance identifier", "_evidence_id"))
+            if self.unknown_policy == "strict":
+                violations.append(Violation("missing_evidence", "Trusted candidate evidence needs a provenance identifier", "_evidence_id"))
         if spec.requires_availability:
             available = facts.get("available")
             if not isinstance(available, bool):
-                violations.append(Violation("missing_evidence", "A trusted boolean availability observation is required", "available"))
+                if self.unknown_policy == "strict":
+                    violations.append(Violation("missing_evidence", "A trusted boolean availability observation is required", "available"))
             elif not available:
                 violations.append(Violation("unavailable", "The selected candidate is unavailable", "available"))
         if spec.requires_price:
             if "total_price" not in facts or facts["total_price"] is None:
-                violations.append(Violation("missing_evidence", "A trusted total price for this action is required", "total_price"))
+                if self.unknown_policy == "strict":
+                    violations.append(Violation("missing_evidence", "A trusted total price for this action is required", "total_price"))
             elif not _number(facts["total_price"]) or facts["total_price"] < 0:
                 violations.append(Violation("invalid_evidence", "Total price must be a finite nonnegative number, excluding booleans", "total_price"))
         if "capacity" in facts:
@@ -236,7 +245,8 @@ class ConstraintChecker:
                 continue
             slot = _SLOT_ALIASES.get(preference.slot, preference.slot)
             if slot not in facts or facts[slot] is None:
-                violations.append(Violation("missing_evidence", f"No trusted '{slot}' evidence to check the hard preference", preference.slot, preference.evidence_id))
+                if self.unknown_policy == "strict":
+                    violations.append(Violation("missing_evidence", f"No trusted '{slot}' evidence to check the hard preference", preference.slot, preference.evidence_id))
                 continue
             try:
                 satisfied = _satisfies(facts[slot], preference.value, preference.operator)

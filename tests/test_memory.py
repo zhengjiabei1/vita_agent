@@ -147,18 +147,26 @@ def test_unsupported_budget_units_and_per_person_scope_do_not_become_total_price
         "total_price": 100.5, "cuisine": "italian"}
 
 
-@pytest.mark.parametrize("text, expected", [
-    ("酒店还是得选万豪集团下的，管理服务环境什么的都要好一些", "marriott"),
-    ("万豪下面的那些酒店也就属喜来登最住得舒心了", "sheraton"),
-    ("以后订酒店也只认准亚朵", "atour"),
-    ("喜来登住得真舒服，下次还住", "sheraton"),
-    ("我最喜欢全季，有吗？", "ji_hotel"),
+@pytest.mark.parametrize("text, expected, strength", [
+    ("酒店还是得选万豪集团下的，管理服务环境什么的都要好一些", "marriott", "soft"),
+    ("万豪下面的那些酒店也就属喜来登最住得舒心了", "sheraton", "soft"),
+    ("以后订酒店也只认准亚朵", "atour", "hard"),
+    ("喜来登住得真舒服，下次还住", "sheraton", "soft"),
+    ("我最喜欢全季，有吗？", "ji_hotel", "soft"),
 ])
-def test_explicit_hotel_brand_preference_is_soft_evidence(text, expected):
+def test_explicit_hotel_brand_preference_is_evidence(text, expected, strength):
     extracted = {item["slot"]: item for item in extract_preferences(evidence(text=text))}
     assert extracted["hotel_brand"]["value"] == expected
-    assert extracted["hotel_brand"]["strength"] == "soft"
+    assert extracted["hotel_brand"]["strength"] == strength
     assert extracted["hotel_brand"]["quote"] in text
+
+
+def test_explicit_phone_wakeup_amenity_is_hard_or_soft():
+    hard = {item["slot"]: item for item in extract_preferences(evidence(text="酒店必须有电话叫醒服务"))}
+    assert hard["hotel_amenities"]["value"] == ["phone_wakeup"]
+    assert hard["hotel_amenities"]["strength"] == "hard"
+    soft = {item["slot"]: item for item in extract_preferences(evidence(text="我喜欢有电话叫醒服务的酒店"))}
+    assert soft["hotel_amenities"]["strength"] == "soft"
 
 
 def test_later_hotel_brand_preference_supersedes_older_one():

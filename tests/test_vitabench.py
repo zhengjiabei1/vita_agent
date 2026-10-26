@@ -149,6 +149,48 @@ def test_hotel_facts_missing_allergens_stay_unknown_and_caches_clear():
     assert facts.rooms == {}
 
 
+def test_hotel_brand_and_amenities_are_observed_for_guard_checks():
+    facts = ObservedFacts()
+    hotel = HOTEL.replace("hotel_name=Hotel,", "hotel_name=长春喜来登酒店,").replace(
+        "tags=[]", "tags=['wifi', '电话叫醒']")
+    facts.observe("get_ota_hotel_info", hotel, "hotel-detail")
+    resolved = facts.resolve(Action("create_hotel_order", {"hotel_id": "h1", "room_id": "r1"}, "id"))
+    assert resolved["hotel_brand"] == "sheraton"
+    assert resolved["hotel_amenities"] == ["phone_wakeup"]
+
+
+def test_hard_hotel_brand_preference_blocks_wrong_brand():
+    from vita_agent.guards import ConstraintChecker
+    from vita_agent.official_facts import get_official_specs
+    from vita_agent.models import Preference
+    facts = ObservedFacts()
+    facts.observe("get_ota_hotel_info", HOTEL.replace("hotel_name=Hotel,", "hotel_name=长春JW万豪酒店,"),
+                  "hotel-detail")
+    resolved = facts.resolve(Action("create_hotel_order", {"hotel_id": "h1", "room_id": "r1"}, "id"))
+    pref = Preference("p1", "u1", "ota", "hotel_brand", "sheraton", "hard", "eq",
+                      "user-message-1", "只住喜来登", 1)
+    violations = ConstraintChecker(get_official_specs(), unknown_policy="warn").check(
+        Action("create_hotel_order", {"hotel_id": "h1", "room_id": "r1", "user_id": "u1"}, "id"),
+        [pref], resolved)
+    assert {v.code for v in violations} == {"preference_conflict"}
+
+
+def test_completion_claim_is_blocked_while_an_order_is_unpaid(monkeypatch):
+    pytest.importorskip("vita.data_model.message")
+    from vita.data_model.message import AssistantMessage, UserMessage
+    drafts = [AssistantMessage(role="assistant", content="都安排好了，祝您愉快！"),
+              AssistantMessage(role="assistant", content="还有订单未支付，需要我现在支付吗？")]
+    agent, memory, _ = _upstream_agent(monkeypatch, drafts, max_regenerations=1)
+    agent.observed_facts.observe(
+        "create_delivery_order",
+        "Order(order_id:o1, order_type:delivery, user_id:u1, store_id:s1, total_price:25.0, status:unpaid, products:[])",
+        "create1")
+    result, _ = agent.generate_next_message(UserMessage(role="user", content="好的，谢谢"), agent.get_init_state())
+    assert result.content == "还有订单未支付，需要我现在支付吗？"
+    assert any(v["code"] == "unpaid_order" for step in agent.guard_audit for v in step["violations"])
+    memory.close()
+
+
 def test_payment_only_has_facts_from_observed_correct_order_type():
     facts = ObservedFacts()
     facts.observe("create_delivery_order", "Order(order_id:o1, order_type:delivery, user_id:u1, store_id:s1, total_price:25.0, status:unpaid, products:[])", "create1")
@@ -232,13 +274,13 @@ def test_actual_guarded_subclass_regenerates_and_accumulates_cost(monkeypatch):
 def test_actual_guarded_subclass_blocks_unsupported_writes(monkeypatch):
     pytest.importorskip("vita.data_model.message")
     from vita.data_model.message import AssistantMessage, ToolCall, UserMessage
-    draft = AssistantMessage(role="assistant", tool_calls=[ToolCall(id="cancel", name="cancel_delivery_order", arguments={"order_id": "o1"})], cost=0.1)
+    draft = AssistantMessage(role="assistant", tool_calls=[ToolCall(id="mystery", name="mystery_write", arguments={"order_id": "o1"})], cost=0.1)
     agent, memory, calls = _upstream_agent(monkeypatch, [draft], max_regenerations=0)
-    result, state = agent.generate_next_message(UserMessage(role="user", content="取消订单"), agent.get_init_state())
+    result, state = agent.generate_next_message(UserMessage(role="user", content="执行未知操作"), agent.get_init_state())
     assert not result.tool_calls
     assert "尚未执行" in result.content
     assert len(calls) == 1
-    assert any(v["code"] in ("unsupported_tool", "missing_evidence") for v in agent.guard_audit[0]["violations"])
+    assert any(v["code"] == "unsupported_tool" for v in agent.guard_audit[0]["violations"])
     memory.close()
 
 

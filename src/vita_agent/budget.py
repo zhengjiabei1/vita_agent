@@ -243,7 +243,7 @@ class BudgetLedger:
                     input_price REAL NOT NULL, output_price REAL NOT NULL,
                     reserved_nano INTEGER NOT NULL, held_nano INTEGER NOT NULL,
                     actual_nano INTEGER, prompt_tokens INTEGER, completion_tokens INTEGER,
-                    state TEXT NOT NULL, reason TEXT,
+                    state TEXT NOT NULL, reason TEXT, label TEXT NOT NULL DEFAULT '',
                     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
                 );
             """)
@@ -261,7 +261,7 @@ class BudgetLedger:
             columns = {row[1] for row in db.execute("PRAGMA table_info(budget_calls)")}
             for name, kind in (("cached_input_price", "REAL"), ("prompt_cache_hit_tokens", "INTEGER"),
                                ("prompt_cache_miss_tokens", "INTEGER"), ("cache_usage_reported", "INTEGER"),
-                               ("response_id", "TEXT")):
+                               ("response_id", "TEXT"), ("label", "TEXT NOT NULL DEFAULT ''")):
                 if name not in columns:
                     db.execute(f"ALTER TABLE budget_calls ADD COLUMN {name} {kind}")
             db.execute("INSERT OR IGNORE INTO budget_meta(singleton,limit_nano,currency,pricing_basis,mode,unit,request_limit) VALUES (1,?,?,?,?,?,?)",
@@ -284,9 +284,12 @@ class BudgetLedger:
 
     def reserve(self, model: str, input_token_bound: int, output_token_limit: int,
                 input_price: float = 0.0, output_price: float = 0.0, *,
-                cached_input_price: float | None = None, units: float | None = None) -> Reservation:
+                cached_input_price: float | None = None, units: float | None = None,
+                label: str = "") -> Reservation:
         if not isinstance(model, str) or not model.strip() or len(model) > 256:
             raise ValueError("A nonempty model name of at most 256 characters is required")
+        if not isinstance(label, str) or len(label) > 64:
+            raise ValueError("label must be a short string")
         input_token_bound = _tokens(input_token_bound, "input_token_bound", positive=True)
         output_token_limit = _tokens(output_token_limit, "output_token_limit", positive=True)
         if self.mode == "currency":
@@ -320,9 +323,10 @@ class BudgetLedger:
             if held + amount > meta["limit_nano"]:
                 raise BudgetExceeded("Insufficient budget for the next bounded API request")
             db.execute("""INSERT INTO budget_calls
-                (id,model,input_bound,output_limit,input_price,output_price,reserved_nano,held_nano,state,cached_input_price)
-                VALUES (?,?,?,?,?,?,?,?,'pending',?)""",
-                (call_id, model, input_token_bound, output_token_limit, input_price, output_price, amount, amount, cached_input_price))
+                (id,model,input_bound,output_limit,input_price,output_price,reserved_nano,held_nano,state,cached_input_price,label)
+                VALUES (?,?,?,?,?,?,?,?,'pending',?,?)""",
+                (call_id, model, input_token_bound, output_token_limit, input_price, output_price,
+                 amount, amount, cached_input_price, label))
         return Reservation(call_id, model, amount / NANOUNITS, input_token_bound, output_token_limit,
                            self.currency, self.mode, self.unit)
 
@@ -398,6 +402,10 @@ class BudgetLedger:
             tokens = db.execute(
                 "SELECT COALESCE(SUM(prompt_tokens),0) AS prompt, COALESCE(SUM(completion_tokens),0) AS completion "
                 "FROM budget_calls WHERE state IN ('settled','overrun')").fetchone()
+            label_rows = db.execute(
+                "SELECT label,COUNT(*) AS n,COALESCE(SUM(prompt_tokens),0) AS prompt,"
+                "COALESCE(SUM(completion_tokens),0) AS completion,COALESCE(SUM(actual_nano),0) AS actual "
+                "FROM budget_calls GROUP BY label ORDER BY label").fetchall()
         held = sum(r["held"] for r in rows)
         measured = sum(r["actual"] or 0 for r in rows) / NANOUNITS
         complete = not any(r["state"] in ("pending", "uncertain") for r in rows)
@@ -416,6 +424,10 @@ class BudgetLedger:
                 "cost_complete": complete,
                 "halted": bool(meta["halted"]), "halted_reason": meta["halted_reason"] or None,
                 "counts": {r["state"]: r["n"] for r in rows},
+                "by_label": [{"label": row["label"] or "unlabeled", "requests": row["n"],
+                              "prompt_tokens": row["prompt"], "completion_tokens": row["completion"],
+                              "total_tokens": row["prompt"] + row["completion"],
+                              "measured": row["actual"] / NANOUNITS} for row in label_rows],
                 "scope": "All chat calls routed through the official _get_client; excludes provider-side fees"}
         if self.mode == "currency":
             aliases = {f"{key}_{self.currency.lower()}": value for key, value in amounts.items()}
@@ -476,8 +488,9 @@ def request_bounds(request: Mapping[str, Any], model_config: Mapping[str, Any], 
 
 
 class _Completions:
-    def __init__(self, original, ledger: BudgetLedger, model_configs: Mapping[str, Any]):
+    def __init__(self, original, ledger: BudgetLedger, model_configs: Mapping[str, Any], label: str = ""):
         self.original, self.ledger, self.model_configs = original, ledger, model_configs
+        self.label = label
 
     def create(self, **request):
         model = request.get("model")
@@ -487,10 +500,11 @@ class _Completions:
         if self.ledger.mode == "currency":
             bounds = request_bounds(request, config, currency=self.ledger.currency)
             cached_price = _cached_price(config, self.ledger.currency)
-            reservation = self.ledger.reserve(model, *bounds, cached_input_price=cached_price)
+            reservation = self.ledger.reserve(model, *bounds, cached_input_price=cached_price,
+                                              label=self.label)
         else:
             bounds = request_bounds(request, config, mode=self.ledger.mode)
-            reservation = self.ledger.reserve(model, *bounds,
+            reservation = self.ledger.reserve(model, *bounds, label=self.label,
                                               units=_free_units(config, self.ledger.unit))
         try:
             response = self.original.create(**request)
@@ -514,7 +528,7 @@ def install_budget_guard(path: str | Path, limit_usd: float | None = None, *,
                          limit: float | None = None, currency: str = "USD",
                          pricing_basis: str = "configured_token_rates",
                          mode: str = "currency", unit: str | None = None,
-                         request_limit: int | None = None) -> BudgetLedger:
+                         request_limit: int | None = None, label: str = "") -> BudgetLedger:
     """Patch the official client factory; install before launching benchmark runs.
 
     Returns the ledger for reporting. Reinstallation targets the same original
@@ -534,7 +548,7 @@ def install_budget_guard(path: str | Path, limit_usd: float | None = None, *,
     def guarded_factory(base_url, api_key, max_retries):
         client = original(base_url=base_url, api_key=api_key, max_retries=0)
         return SimpleNamespace(chat=SimpleNamespace(completions=_Completions(
-            client.chat.completions, ledger, llm_utils.models)))
+            client.chat.completions, ledger, llm_utils.models, label=label)))
 
     guarded_factory._budget_original = original
     llm_utils._get_client = guarded_factory

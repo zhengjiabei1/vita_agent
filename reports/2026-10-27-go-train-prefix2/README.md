@@ -51,7 +51,7 @@
 | baseline+harness 计划 SHA-256 | `84bcceb4a15bc2a8e1c00b3152e795f2c1f1571bb12c4b1f8aaacd1a0a6886f4` |
 | memory 计划 SHA-256 | `a3d24066a4b789fe1b30f6b91608e30cbfc729deeca78c359d7073663ee5ba6d` |
 
-baseline/harness 在“structured memory 当前轮抽取传递 llm/args”修复之前完成；该修复只影响 memory 臂，baseline/harness 使用官方 full-context memory，不会进入该代码路径。由于源码哈希随后变化，这两个历史计划不能再直接 execute；memory 计划是在修复后创建的。任何正式复跑都必须新建计划。
+baseline/harness 在“structured memory 当前轮抽取传递 llm/args”修复之前完成；该修复只影响 memory 臂，baseline/harness 使用官方 full-context memory，不会进入该代码路径。由于源码哈希随后变化，这两个历史计划不能再直接 execute；memory 计划是在修复后创建的。之后又完成了 CGL fail-open、酒店品牌/电话叫醒事实和未支付完成拦截的 P0 修正，因此**全部旧计划都已失效**；任何正式复跑都必须新建计划。历史结果本身保留为证据。
 
 ```bash
 set -a; . ./.env; set +a

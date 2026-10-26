@@ -6,13 +6,15 @@
 
 实现 **Training-Free Personalized Service Agent on VitaBench 2.0**：执行前约束检查、带证据的结构化偏好记忆、从训练失败轨迹离线提炼并冻结的技能库。用户已说明简历中的 `0.440 → 0.570`、`+8.6%`、`0.38 → 0.48`、`4.6pp` 是猜测值；它们不是结果，也不应作为调参必须达到的目标。
 
-当前是已有代码、单元测试和小规模真实训练试验的研究原型，**完整实验尚未完成，也没有证实性能提升**。截至 2026-10-27，268 项测试通过（已安装固定官方包，无 skip）；本地模拟演示成功；`ruff --select E4,E7,E9,F` 检查通过。未指定规则的全面 Ruff 检查仍有风格/类型建议，不能称为所有静态规则通过。
+当前是已有代码、单元测试和小规模真实训练试验的研究原型，**完整实验尚未完成，也没有证实性能提升**。截至 2026-10-27，274 项测试通过（已安装固定官方包，无 skip）；本地模拟演示成功；`ruff --select E4,E7,E9,F` 检查通过。未指定规则的全面 Ruff 检查仍有风格/类型建议，不能称为所有静态规则通过。
 
 用户要求换平台/模型继续。此前 DeepSeek 总预算上限是 20 元，随后明确转向免费模型，付费调用已暂停。**不要恢复旧付费调用，不要把此前预算视为新平台的付费授权。** 密钥只通过环境设置提供，不放进聊天、Git、日志或结果文件。旧 `VITA_API_KEY` 绑定 DeepSeek 域名，不能直接拿到新供应商使用。
 
 2026-10-27 进展：固定官方代码/数据和用户划分已恢复并核对；`budget.py`/`experiments.py` 支持货币、请求数和积分三种共享额度（拒绝 0 单价，429 会 halt）；`skill_reflection` v2 已接入 `FrozenSkillBank.load`、计划校验和 `scripts/reflect_skills.py`；新增明确酒店品牌软偏好规则；完成 archived prefix2 零分诊断。
 
 OpenCode 免费模型 `deepseek-v4.1-flash-free` 的最小预检返回 HTTP 429 `FreeUsageLimitError`。经用户明确授权使用付费 Go 模型后，Go 端点 `https://opencode.ai/inference/go/openai/v1` + `x-opencode-session` 连通成功。真实训练 prefix2 在 `deepseek-v4.1-flash` 上完成三臂：**baseline 0.0、harness 0.0、memory 0.0**，每臂 1 个训练用户 × 2 子任务 × 1 trial；不是测试集成绩，也没有证明提升。三臂均无工具错误；baseline/harness 到 `max_steps`，memory `agent_stop`。memory 选到喜来登品牌，但仍未满足电话叫醒、支付、外卖肉类/低 GI 等条件。共享 ledger 用 **176/200 请求**、1,828,931 输入、56,745 输出，按配置单价估算 **0.30838665 USD**。剩余 24 请求不足以做有效 dev 技能筛选 + 五组消融，未运行 skills/full/test。证据见 [Go prefix2](reports/2026-10-27-go-train-prefix2/)、[provider quota](reports/2026-10-27-provider-quota/) 和 [zero-score diagnosis](reports/2026-10-27-zero-score-diagnosis/)。
+
+零分后已完成一轮 **P0 代码修正（未调用模型）**：官方 CGL 未知事实 fail-open、明确违反仍 BLOCK；酒店品牌/电话叫醒事实可检查；未支付订单阻止“完成”声明；预算请求按 variant 标记；测试增至 274。这些改动尚未在真实 dev 上验证，下一步需要新请求额度。
 
 ## 已完成的实现
 
@@ -94,7 +96,7 @@ Qwen Code 官方文档已注明 OAuth 免费套餐 2026-04-15 停用，不依赖
 
 先读 HANDOFF.md、README.md、docs/verification.md、docs/experiments.md，以及 reports/2026-10-26-train-prefix2/、reports/2026-10-27-zero-score-diagnosis/、reports/2026-10-27-provider-quota/。检查代码和证据，不要从零重写。
 
-简历中的 0.440→0.570、8.6%、0.38→0.48、4.6pp 都是猜测，禁止作为真实结果。当前268项测试通过；已完成新 Go 模型上1个训练用户、2子任务、baseline/harness/memory各1trial，三臂均0分；不是测试集，也未完成 skills/full 和完整消融。已用176/200请求、估算0.3084 USD；剩余额度不足以继续有效五组。下一步申请新的请求额度，先新建计划，再跑 skills/full 和保留测试。
+简历中的 0.440→0.570、8.6%、0.38→0.48、4.6pp 都是猜测，禁止作为真实结果。当前274项测试通过；已完成新 Go 模型上1个训练用户、2子任务、baseline/harness/memory各1trial，三臂均0分；不是测试集，也未完成 skills/full 和完整消融。已用176/200请求、估算0.3084 USD；剩余额度不足以继续有效五组。下一步申请新的请求额度，先新建计划，再跑 skills/full 和保留测试。
 
 我要换平台/模型继续，优先免费API；旧DeepSeek付费调用已停止。先完成本地工作，再通过环境密钥设置获取实际需要的凭据，不能让我在聊天里贴Key，也不能未经授权产生费用。
 

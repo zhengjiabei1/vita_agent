@@ -47,6 +47,17 @@ def test_supported_preference_operators(slot, value, operator):
     assert ConstraintChecker().check(food(), [preference(slot, value, operator)], evidence()) == []
 
 
+def test_warn_policy_fails_open_on_unknown_but_blocks_explicit_violation():
+    checker = ConstraintChecker(unknown_policy="warn")
+    hard = preference("vegetarian", True, "eq")
+    assert checker.check(food(), [hard], {}) == []
+    assert checker.check(food(), [], None) == []
+    assert "unavailable" in codes(checker.check(food(), [], {"available": False, "total_price": 20}))
+    assert "budget_exceeded" in codes(checker.check(food(), [preference()], evidence(total_price=100)))
+    with pytest.raises(ValueError, match="unknown_policy"):
+        ConstraintChecker(unknown_policy="ignore")
+
+
 def test_missing_hard_evidence_blocks_but_soft_and_inactive_do_not():
     hard = preference("vegetarian", True, "eq")
     assert "missing_evidence" in codes(ConstraintChecker().check(food(vegetarian=True), [hard], evidence()))
