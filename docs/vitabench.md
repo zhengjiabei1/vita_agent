@@ -122,4 +122,4 @@ python scripts/run_experiments.py check artifacts/smoke-v1/plan.json
 
 已下载并核对官方完整数据集，固定 seed=42 按用户划分为 train 33 用户 / 464 子任务、dev 11 / 149、test 12 / 158。已完成真实 DeepSeek 的训练集 prefix2 试验：1 个训练用户、前 2 个子任务、1 次 trial，baseline 与 harness 均为 0.0；官方 `agent_cost` 聚合缺失，成本增长率为 `null`。一个较早的训练试跑已中止，不能作为完整评分结果。零分诊断见 [reports/2026-10-27-zero-score-diagnosis](../reports/2026-10-27-zero-score-diagnosis/)：baseline 选择了高 GI 外卖和错误酒店品牌；harness 多次阻塞且最终无外卖订单。
 
-尚未完成开发集、保留测试集或五组真实消融，因此没有复现 `0.440 → 0.570`、`+8.6%` 成本、`0.38 → 0.48` 或 `+4.6pp`；这些数字不作为本实现的成绩。旧付费调用已暂停；OpenCode 免费模型已接入请求数/积分账本，但当前免费额度返回 429，真实调用已停止（见 [reports/2026-10-27-provider-quota](../reports/2026-10-27-provider-quota/)）。继续开发见 [HANDOFF.md](../HANDOFF.md)。
+尚未完成开发集、保留测试集或五组真实消融，因此没有复现 `0.440 → 0.570`、`+8.6%` 成本、`0.38 → 0.48` 或 `+4.6pp`；这些数字不作为本实现的成绩。OpenCode 免费额度返回 429 后，经用户授权在 Go 端点 `deepseek-v4.1-flash` 上完成训练 prefix2 baseline/harness/memory 三臂，均 **0.0**；176/200 请求，估算 0.30838665 USD。详见 [reports/2026-10-27-go-train-prefix2](../reports/2026-10-27-go-train-prefix2/) 和 [reports/2026-10-27-provider-quota](../reports/2026-10-27-provider-quota/)。继续开发见 [HANDOFF.md](../HANDOFF.md)。

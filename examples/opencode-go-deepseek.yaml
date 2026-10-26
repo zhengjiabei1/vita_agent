@@ -1,0 +1,26 @@
+# OpenCode Go endpoint, verified 2026-10-27.
+#
+# The free `deepseek-v4.1-flash-free` endpoint returned HTTP 429 on this account,
+# so this config uses the paid Go route that the user explicitly authorized.
+# The Go endpoint requires an x-opencode-session header in addition to the
+# bearer token; both are supplied through environment variables.
+#
+# Prices are the OpenCode model-list prices in USD per 1M tokens. They are a
+# configured estimate, not a provider invoice. Keep OPENCODE_API_KEY and
+# OPENCODE_SESSION_ID in .env (gitignored) or the process environment.
+default:
+  base_url: https://opencode.ai/inference/go/openai/v1
+  api_key: ${OPENCODE_API_KEY}
+  extra_headers:
+    x-opencode-session: ${OPENCODE_SESSION_ID}
+  temperature: 0.0
+  max_tokens: 4096
+  extra_body:
+    thinking:
+      type: disabled
+  cost_1m_token_dollar:
+    prompt_price: 0.15
+    completion_price: 0.6
+  pricing_basis: configured_token_rates
+models:
+  - name: deepseek-v4.1-flash

@@ -17,3 +17,5 @@ artifacts/
 *.key
 models.local.yaml
 *.local.yaml
+
+.DS_Store

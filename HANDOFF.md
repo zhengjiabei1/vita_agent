@@ -6,11 +6,13 @@
 
 实现 **Training-Free Personalized Service Agent on VitaBench 2.0**：执行前约束检查、带证据的结构化偏好记忆、从训练失败轨迹离线提炼并冻结的技能库。用户已说明简历中的 `0.440 → 0.570`、`+8.6%`、`0.38 → 0.48`、`4.6pp` 是猜测值；它们不是结果，也不应作为调参必须达到的目标。
 
-当前是已有代码、单元测试和小规模真实训练试验的研究原型，**完整实验尚未完成，也没有证实性能提升**。截至 2026-10-27，265 项测试通过（已安装固定官方包，无 skip）；本地模拟演示成功；`ruff --select E4,E7,E9,F` 检查通过。未指定规则的全面 Ruff 检查仍有风格/类型建议，不能称为所有静态规则通过。
+当前是已有代码、单元测试和小规模真实训练试验的研究原型，**完整实验尚未完成，也没有证实性能提升**。截至 2026-10-27，268 项测试通过（已安装固定官方包，无 skip）；本地模拟演示成功；`ruff --select E4,E7,E9,F` 检查通过。未指定规则的全面 Ruff 检查仍有风格/类型建议，不能称为所有静态规则通过。
 
 用户要求换平台/模型继续。此前 DeepSeek 总预算上限是 20 元，随后明确转向免费模型，付费调用已暂停。**不要恢复旧付费调用，不要把此前预算视为新平台的付费授权。** 密钥只通过环境设置提供，不放进聊天、Git、日志或结果文件。旧 `VITA_API_KEY` 绑定 DeepSeek 域名，不能直接拿到新供应商使用。
 
-2026-10-27 进展：固定官方代码/数据和用户划分已恢复并核对；`budget.py`/`experiments.py` 已支持真正的免费请求数/积分模式（拒绝 0 单价，429 会 halt 共享 ledger）；`skill_reflection` v2 已接入 `FrozenSkillBank.load`、计划校验和 `scripts/reflect_skills.py`；新增明确酒店品牌软偏好规则；完成 archived prefix2 零分诊断。OpenCode 免费模型 `deepseek-v4.1-flash-free` 的最小预检返回 HTTP 429 `FreeUsageLimitError`，所以**没有新模型 baseline 或正式五组分数，真实调用已停止**。付费端点返回 402 `Insufficient account funds`，未继续尝试。证据见 [provider quota](reports/2026-10-27-provider-quota/) 和 [zero-score diagnosis](reports/2026-10-27-zero-score-diagnosis/)。
+2026-10-27 进展：固定官方代码/数据和用户划分已恢复并核对；`budget.py`/`experiments.py` 支持货币、请求数和积分三种共享额度（拒绝 0 单价，429 会 halt）；`skill_reflection` v2 已接入 `FrozenSkillBank.load`、计划校验和 `scripts/reflect_skills.py`；新增明确酒店品牌软偏好规则；完成 archived prefix2 零分诊断。
+
+OpenCode 免费模型 `deepseek-v4.1-flash-free` 的最小预检返回 HTTP 429 `FreeUsageLimitError`。经用户明确授权使用付费 Go 模型后，Go 端点 `https://opencode.ai/inference/go/openai/v1` + `x-opencode-session` 连通成功。真实训练 prefix2 在 `deepseek-v4.1-flash` 上完成三臂：**baseline 0.0、harness 0.0、memory 0.0**，每臂 1 个训练用户 × 2 子任务 × 1 trial；不是测试集成绩，也没有证明提升。三臂均无工具错误；baseline/harness 到 `max_steps`，memory `agent_stop`。memory 选到喜来登品牌，但仍未满足电话叫醒、支付、外卖肉类/低 GI 等条件。共享 ledger 用 **176/200 请求**、1,828,931 输入、56,745 输出，按配置单价估算 **0.30838665 USD**。剩余 24 请求不足以做有效 dev 技能筛选 + 五组消融，未运行 skills/full/test。证据见 [Go prefix2](reports/2026-10-27-go-train-prefix2/)、[provider quota](reports/2026-10-27-provider-quota/) 和 [zero-score diagnosis](reports/2026-10-27-zero-score-diagnosis/)。
 
 ## 已完成的实现
 
@@ -37,17 +39,18 @@
 - 上述完成试验共 64 次已结算模型请求，输入 1355720、输出 12249 Token。此前完整用户试跑中途停止，不能加入分数均值。具体费用分类以发布的汇总为准。
 - 旧费用按峰时未命中缓存价格作上界估计，**不是供应商实际账单**。官方 `agent_cost` 有缺失，两组成本和增幅为 `null`，不能填 0 或声称 +8.6%。
 - 2026-10-27 零分诊断：两臂都正常 `user_stop`，评分完整。baseline 的外卖商品含 `高GI` 标签、酒店品牌不是喜来登；harness 有 4 次校验/兜底阻塞、最终状态无外卖订单、酒店未支付。两臂工具错误均为 0，规则技能导出均为 0 条。详见 `reports/2026-10-27-zero-score-diagnosis/`。
-- 2026-10-27 免费模型预检：`deepseek-v4.1-flash-free` 返回 HTTP 429 `FreeUsageLimitError`，1 次请求记为 uncertain，ledger halt；付费 `deepseek-v4.1-flash` 返回 HTTP 402，未继续。详见 `reports/2026-10-27-provider-quota/`。
-- 没有完成 memory/skills/full 的真实对照、dev/test 正式评测、重复 trial；没有经真实训练/开发验证的冻结技能库。
+- 2026-10-27 免费模型预检：`deepseek-v4.1-flash-free` 返回 HTTP 429 `FreeUsageLimitError`；付费 Go 端点随后经用户授权连通。预检验证了工具调用、JSON、106,659 Token 长上下文和 usage。详见 `reports/2026-10-27-provider-quota/`。
+- 2026-10-27 Go 训练 prefix2：`deepseek-v4.1-flash` 上 baseline/harness/memory 三臂均 **0.0**；update 子集均 0.0；只有 1 用户，无置信区间。176 请求、1,828,931 输入、56,745 输出、估算 0.30838665 USD。详见 `reports/2026-10-27-go-train-prefix2/`。
+- 没有完成 skills/full 的真实对照、dev/test 正式评测、重复 trial；没有经真实训练/开发验证的冻结技能库。剩余 24 请求不足以完成这些步骤。
 
 ## 下一步必须处理的断点
 
-1. **免费配额控制。已实现，等待真实额度。** `budget.py` 支持 `requests`/`credits` 模式；模型 YAML 使用 `billing: free` + `free_quota`，不能填 0 单价。每次调用预留单位、记录 Token、共享 SQLite ledger；402/429/quota 错误立即 halt。`scripts/verify_provider.py`、`scripts/reflect_skills.py` 和正式 runner 都走同一账本。当前 OpenCode 免费额度返回 429，必须等额度恢复或经用户明确授权换服务；不要自动付费。
-2. **确认新模型兼容性。部分完成。** 已固定 `deepseek-v4.1-flash-free`、端点、1M 上下文/32k 输出声明，并写好工具/JSON/长上下文/usage 预检；但真实预检在第一个请求就 429，未完成能力验证。额度恢复后先跑预检，再重跑同模型 baseline；不能与旧 DeepSeek 分数直接比较。
-3. **训练零分诊断。已完成 archived 诊断。** baseline 选高 GI 外卖和错误酒店品牌；harness 多次阻塞、最终无外卖订单；两臂均 `user_stop`、无工具错误。没有评分器缺陷证据。见 `reports/2026-10-27-zero-score-diagnosis/`。不要用增加样本或改评分规则制造提升。
-4. **记忆覆盖验证。部分完成。** 训练集 27,762 条去重原话中，明确预算/过敏/菜系规则原有 1 条命中；新增明确正向酒店品牌软偏好后为 18 条（17 品牌 + 1 预算）。这是覆盖统计，不是召回率或效果。语义抽取仍需真实模型验证；不得从隐藏偏好/rubric 抽取。
-5. **反思技能集成。已接通代码，未生成真实库。** v2 已被 `FrozenSkillBank.load`、计划校验和 `scripts/reflect_skills.py` 接受，并有单元测试。archived 两臂导出规则技能均为 0 条（无工具错误）；LLM 反思因额度 429 未执行。恢复额度后只从训练失败反思，dev 选效用/淘汰，再冻结供 test；没有候选就不写快照。
-6. **正式实验。被额度阻塞。** 已创建可校验的免费 prefix2 训练计划（`artifacts/free-train-prefix2-v2`, gitignored），但未执行。正式 baseline、harness、memory、skills、full 五组及重复 trial 都尚未完成。额度恢复后新建计划，先 baseline，再 memory/skills/full，最后保留 test；报告真实均值、update 子集、用户级 bootstrap、失败率、请求/Token/现金/积分。
+1. **配额控制。已实现并实测。** `budget.py` 支持货币、`requests`、`credits` 三种模式；免费模式拒绝 0 单价；付费模式可附加请求上限（本次 200）。每次调用预留、记录 Token、共享 SQLite ledger；402/429/quota 错误立即 halt。`scripts/verify_provider.py`、`scripts/reflect_skills.py` 和正式 runner 都走同一账本。免费额度 429 后，经用户明确授权使用付费 Go；没有自动升级或绕过。
+2. **新模型兼容性。已完成预检。** Go 端点需要 `x-opencode-session` 头；`scripts/verify_provider.py` 已验证工具调用、JSON、106,659 Token 长上下文、usage。模型固定为 `deepseek-v4.1-flash`，不能与旧 DeepSeek 分数直接比较；同模型 baseline 已重跑。
+3. **训练零分诊断。已完成两轮。** archived DeepSeek 两臂 0 分；新 Go 三臂 0 分。baseline/harness 选高 GI 外卖和错误酒店品牌；memory 选到喜来登但缺电话叫醒/支付，外卖是鱼肉。三臂无工具错误。没有评分器缺陷证据。见 `reports/2026-10-27-zero-score-diagnosis/` 和 `reports/2026-10-27-go-train-prefix2/`。
+4. **记忆覆盖验证。部分完成。** 训练集 27,762 条去重原话中，规则命中从 1 条增加到 18 条（17 酒店品牌 + 1 预算）；这是覆盖统计，不是召回率或效果。Go memory 臂真实运行，品牌变为喜来登，但总分仍 0.0；需要 dev 重复 trial 才能判断稳定性。
+5. **反思技能集成。已接通代码，未生成真实库。** v2 已被 `FrozenSkillBank.load`、计划校验和 `scripts/reflect_skills.py` 接受，并有单元测试。两轮训练均无可识别工具错误，规则导出 0 条；Go 剩余 24 请求不足以完成有效反思 + dev 筛选 + skills/full。没有伪造技能库。
+6. **正式实验。部分完成，仍被额度限制。** 已在新 Go 模型上完成 1 用户 × 2 子任务 × baseline/harness/memory 各 1 trial，三臂均 0.0；不是测试集，也没有五组。剩余 24/200 请求。要继续 skills/full 与 dev/test，需要新的请求额度并新建计划；报告真实均值、update 子集、用户级 bootstrap、失败率、请求/Token/费用。
 
 `budget.py` 已支持可选 `cached_prompt_price`，但历史 DeepSeek YAML 未启用；旧账本不能追溯改写成实际费用。原始试跑计划早于最近的缓存/反思代码更改，跨平台路径也不同，**只作历史证据，不能直接 execute**。每次改源码、数据、模型配置或技能库，都应重新创建计划。
 
@@ -66,7 +69,7 @@ python -m ruff check --isolated --select E4,E7,E9,F src tests scripts
 python -m vita_agent demo
 ```
 
-锁定文件记录当前 Python 3.12 环境的第三方版本，未承诺在所有操作系统和 Python 版本可安装；若安装失败，记录实际错误并解决依赖，不静默更新评测依赖。新环境完整集成检查应确认官方依赖确已安装，不能把 `importorskip` 后的较少测试通过数误称为全部测试通过（当前完整安装为 265 项）。
+锁定文件记录当前 Python 3.12 环境的第三方版本，未承诺在所有操作系统和 Python 版本可安装；若安装失败，记录实际错误并解决依赖，不静默更新评测依赖。新环境完整集成检查应确认官方依赖确已安装，不能把 `importorskip` 后的较少测试通过数误称为全部测试通过（当前完整安装为 268 项）。
 
 另行克隆官方仓库并 checkout 固定 commit，保持其工作树不变。按官方 README 下载数据至该仓库的 `data/vita/domains/personalization/tasks.json`，验证上方 SHA-256。不要把 131 MB 数据集、密钥或本机绝对路径写进新提交。原环境参考路径是 `/workspace/scratch/vitabench2-reference`，新平台可选别的路径并通过 `--upstream`/`--dataset` 显式传入。
 
@@ -91,7 +94,7 @@ Qwen Code 官方文档已注明 OAuth 免费套餐 2026-04-15 停用，不依赖
 
 先读 HANDOFF.md、README.md、docs/verification.md、docs/experiments.md，以及 reports/2026-10-26-train-prefix2/、reports/2026-10-27-zero-score-diagnosis/、reports/2026-10-27-provider-quota/。检查代码和证据，不要从零重写。
 
-简历中的 0.440→0.570、8.6%、0.38→0.48、4.6pp 都是猜测，禁止作为真实结果。当前265项测试通过；唯一完成的真实试验是1个训练用户、2子任务、baseline/harness各1trial，两组均0分，未完成正式测试和完整消融。OpenCode 免费模型已接入请求数/积分模式，但当前返回429；下一步先确认额度恢复，跑同模型 baseline，再执行 memory/skills/full 和保留测试。
+简历中的 0.440→0.570、8.6%、0.38→0.48、4.6pp 都是猜测，禁止作为真实结果。当前268项测试通过；已完成新 Go 模型上1个训练用户、2子任务、baseline/harness/memory各1trial，三臂均0分；不是测试集，也未完成 skills/full 和完整消融。已用176/200请求、估算0.3084 USD；剩余额度不足以继续有效五组。下一步申请新的请求额度，先新建计划，再跑 skills/full 和保留测试。
 
 我要换平台/模型继续，优先免费API；旧DeepSeek付费调用已停止。先完成本地工作，再通过环境密钥设置获取实际需要的凭据，不能让我在聊天里贴Key，也不能未经授权产生费用。
 

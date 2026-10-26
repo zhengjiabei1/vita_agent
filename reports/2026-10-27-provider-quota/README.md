@@ -25,11 +25,12 @@ Free models work in OpenCode; subscribe to OpenCode Go to keep going.
 
 ## 结论
 
-- 免费额度在本次会话中已耗尽，必须停止真实模型调用，保存进度。
+- 免费额度在本次会话中已耗尽，必须停止免费真实模型调用，保存进度。
 - 这不是代码、数据或评测失败；计费/额度控制在请求前正常拦截并 halt 共享 ledger。
-- 未获得新模型上的 baseline、memory、skills、full 任何真实分数，不能把旧 DeepSeek 分数或简历猜测值当作新结果。
-- 额度恢复后应先重跑同模型 baseline，再按新计划执行；本仓库已提供请求数/积分模式、预检脚本和可复现的 prefix2 训练计划。
-- 未尝试通过订阅或付费端点绕过该限制。
+- 用户随后明确授权付费 Go 模型；Go 端点 `https://opencode.ai/inference/go/openai/v1`（需要 `x-opencode-session`）连通成功，已完成 baseline/harness/memory 三臂训练 prefix2，三臂均 0.0。见 [reports/2026-10-27-go-train-prefix2](../2026-10-27-go-train-prefix2/)。
+- 仍未完成 skills/full 和保留测试集；不能把旧 DeepSeek 分数或简历猜测值当作新结果。
+- 免费模型后续恢复额度时应先重跑同模型 baseline，再按新计划执行；本仓库已提供请求数/积分模式、预检脚本和可复现的 prefix2 训练计划。
+- 没有自动升级；付费 Go 使用是用户明确授权的，并受 200 请求和 1 USD 本地上限约束。
 
 ## 复现
 

@@ -2,6 +2,8 @@
 
 日期：2026-10-27。计划在本地 `artifacts/free-train-prefix2-final3/plan.json`（gitignored），**没有 execute**。原因是 OpenCode 免费额度返回 429，见 [provider quota](../2026-10-27-provider-quota/)。
 
+用户随后授权付费 Go 模型；实际执行改用 Go 计划和独立共享 ledger，结果见 [go-train-prefix2](../2026-10-27-go-train-prefix2/)。本文件保留为免费模型的配置示例，不是结果。
+
 ## 固定配置
 
 | 字段 | 值 |

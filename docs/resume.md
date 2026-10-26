@@ -11,8 +11,8 @@
 - 实现带原文证据和覆盖链的结构化偏好记忆，区分硬约束与软偏好；支持确定性规则、可选 LLM 抽取和原始证据回退检索。
 - 实现从训练失败轨迹离线提炼技能、开发集效用淘汰和 SHA-256 冻结；LLM 反思 v2 快照已接入统一只读加载器和实验计划校验。
 - 实现共享额度账本：支持货币、免费请求数和供应商积分三种模式；免费模式拒绝 0 单价伪造，遇到 402/429/额度耗尽立即 halt，训练/开发/测试/反思共用上限。
-- 完成一次真实训练集短前缀诊断：1 个训练用户 × 2 子任务 × baseline/harness 各 1 trial，两组均为 0.0；定位到高 GI 外卖选择、错误酒店品牌和 harness 阻塞，未发现评分器缺陷。**未声称性能提升。**
-- 265 项测试通过；本地演示与官方固定版本/数据哈希校验通过；正式测试集评测和五组消融尚未完成（免费额度 429 阻塞）。
+- 完成真实训练集短前缀诊断：1 个训练用户 × 2 子任务；旧 DeepSeek 的 baseline/harness 与 OpenCode Go `deepseek-v4.1-flash` 的 baseline/harness/memory 均为 **0.0**；定位到高 GI 外卖、错误酒店品牌、memory 品牌改善但服务/支付约束未满足，未发现评分器缺陷。**未声称性能提升。**
+- 268 项测试通过；本地演示与官方固定版本/数据哈希校验通过；Go 三臂用 176/200 请求、估算 0.3084 USD；正式测试集评测和 skills/full 五组消融尚未完成（额度不足，需新计划）。
 
 **可诚实写的能力关键词**：VitaBench 2.0、LLM Agent、执行前约束检查、结构化偏好记忆、证据引用、离线技能演化、可复现实验、配额/预算控制、Python、pytest。
 
@@ -25,14 +25,14 @@
 - Implemented structured preference memory with exact evidence quotes and supersession chains, separating hard constraints from soft preferences, plus optional LLM extraction and raw-evidence fallback retrieval.
 - Implemented offline skill distillation from failed training traces, development-set utility retirement and SHA-256 freezing; citation-checked v2 reflection snapshots load through the same read-only bank used by experiment plans.
 - Implemented a shared quota ledger for currency, free request counts and provider credits; free mode rejects fabricated zero prices and halts immediately on 402/429/quota exhaustion across train/dev/test/reflection.
-- Ran one real training-prefix diagnostic (1 user × 2 subtasks × baseline/harness), both 0.0; identified high-GI meal selection, wrong hotel brand and harness blocking, with no evaluator-defect evidence. **No performance improvement is claimed.**
-- 265 tests pass; pinned version/data checks and local demo pass; formal held-out evaluation and the five-variant ablation remain blocked by the free-tier 429.
+- Ran real training-prefix diagnostics (1 user × 2 subtasks): DeepSeek baseline/harness and OpenCode Go `deepseek-v4.1-flash` baseline/harness/memory all scored 0.0; identified high-GI meal selection, wrong hotel brand, and a memory brand change that still missed service/payment constraints, with no evaluator-defect evidence. **No performance improvement is claimed.**
+- 268 tests pass; pinned version/data checks and local demo pass; the Go three-arm run used 176/200 requests (~0.3084 USD estimate); formal held-out evaluation and the skills/full five-variant ablation remain unfinished (quota exhausted, new plan required).
 
 ## 不应写的内容
 
 - “在 VitaBench 2.0 上提升 13 个百分点 / 达到 0.570 / 成本降低 8.6% / 偏好准确率 0.38→0.48 / 提升 4.6pp”。
 - “完成 5 组消融并证明记忆/技能有效”。
 - “在测试集上取得 X 分”。
-- “使用 Qwen/OpenCode 完成了正式评测”（只完成了接口预检，且被 429 阻塞）。
+- “使用 OpenCode Go 完成了正式五组/测试集评测并证明提升”（只完成了 1 个训练用户、2 子任务的三臂诊断，均为 0.0）。
 
 如果未来完成正式实验，必须用新模型重跑 baseline，并按 `docs/experiments.md` 的计划、真实均值、update 子集、用户级置信区间、请求/Token/费用/积分更新本文件。

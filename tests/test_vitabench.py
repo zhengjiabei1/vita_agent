@@ -242,6 +242,20 @@ def test_actual_guarded_subclass_blocks_unsupported_writes(monkeypatch):
     memory.close()
 
 
+def test_current_turn_llm_extraction_receives_agent_model(monkeypatch):
+    pytest.importorskip("vita.data_model.message")
+    from vita.data_model.message import AssistantMessage, UserMessage
+    drafts = [AssistantMessage(role="assistant", content='{"preferences": []}'),
+              AssistantMessage(role="assistant", content="ok")]
+    agent, memory, calls = _upstream_agent(monkeypatch, drafts)
+    memory.extraction = "llm"
+    result, _ = agent.generate_next_message(UserMessage(role="user", content="我喜欢喜来登"), agent.get_init_state())
+    assert result.content == "ok"
+    assert calls[0]["model"] == "mock"
+    assert "evidence" in str(calls[0]["messages"][-1].content)
+    memory.close()
+
+
 def test_current_user_turns_supersede_and_unknown_cost_stays_unknown(monkeypatch):
     pytest.importorskip("vita.data_model.message")
     from vita.data_model.message import AssistantMessage, UserMessage

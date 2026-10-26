@@ -249,6 +249,18 @@ def test_free_execution_requires_request_quota_and_shares_ledger(inputs, monkeyp
     assert execution["pricing_basis"] == "free_provider_quota"
 
 
+def test_paid_execution_accepts_secondary_request_cap(inputs, monkeypatch):
+    build_plan(**dict(inputs, variants=["baseline"]))
+    monkeypatch.setenv("VITA_TEST_KEY", "test-only-value")
+    class Failure:
+        returncode = 9
+    monkeypatch.setattr("vita_agent.experiments.subprocess.run", lambda *a, **k: Failure())
+    with pytest.raises(RuntimeError, match="Official evaluation failed"):
+        execute_plan(inputs["output"] / "plan.json", budget_usd=5, max_requests=7)
+    execution = json.loads((inputs["output"] / "execution.json").read_text())
+    assert execution["mode"] == "currency" and execution["request_limit"] == 7
+
+
 def test_paid_model_rejects_request_quota(inputs, monkeypatch):
     build_plan(**dict(inputs, variants=["baseline"]))
     monkeypatch.setenv("VITA_TEST_KEY", "test-only-value")

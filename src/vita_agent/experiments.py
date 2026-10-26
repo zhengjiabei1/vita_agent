@@ -304,52 +304,52 @@ def execute_plan(path: str | Path, *, budget_usd: float | None = None, budget_cn
     request (or a configured credit cost) per call; zero token prices are never
     supplied as a workaround. Provider billing/quota remains authoritative.
     """
-    supplied = [value for value in (budget_usd, budget_cny, max_requests, max_credits) if value is not None]
-    if len(supplied) != 1:
-        raise ValueError("Specify exactly one of --budget-usd, --budget-cny, --max-requests or --max-credits")
+    if budget_usd is None and budget_cny is None and max_requests is None and max_credits is None:
+        raise ValueError("Specify an API budget or a request/credit quota")
+    if budget_usd is not None and budget_cny is not None:
+        raise ValueError("Specify exactly one API budget currency")
     for value, name in ((budget_usd, "API budget"), (budget_cny, "API budget"),
-                        (max_requests, "max_requests"), (max_credits, "max_credits")):
-        if value is None:
-            continue
-        if name == "max_requests":
-            if isinstance(value, bool) or not isinstance(value, int) or value < 1:
-                raise ValueError("max_requests must be a positive integer")
-        elif isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or value <= 0:
+                        (max_credits, "max_credits")):
+        if value is not None and (isinstance(value, bool) or not isinstance(value, (int, float))
+                                  or not math.isfinite(value) or value <= 0):
             raise ValueError(f"A positive finite {name} is required")
+    if max_requests is not None and (
+            isinstance(max_requests, bool) or not isinstance(max_requests, int) or max_requests < 1):
+        raise ValueError("max_requests must be a positive integer")
     path = Path(path).resolve()
     plan = verify_plan(path, require_credentials=True)
     billing = plan["model"]["billing"]
+    request_limit = None
     if billing == "free":
+        if max_requests is not None and max_credits is not None:
+            raise ValueError("Specify exactly one free request or credit limit")
         quota = plan["model"]["free_quota"]
         if quota["unit"] == "request":
             if max_requests is None:
                 raise ValueError("Free request-based model requires --max-requests")
-            if isinstance(max_requests, bool) or not isinstance(max_requests, int) or max_requests < 1:
-                raise ValueError("max_requests must be a positive integer")
             budget, currency = max_requests, "FREE"
             mode, unit, pricing_basis = "requests", "request", "free_provider_quota"
         else:
             if max_credits is None:
                 raise ValueError("Free credit-based model requires --max-credits")
-            if (isinstance(max_credits, bool) or not isinstance(max_credits, (int, float))
-                    or not math.isfinite(max_credits) or max_credits <= 0):
-                raise ValueError("max_credits must be a positive finite number")
             budget, currency = max_credits, "FREE"
             mode, unit, pricing_basis = "credits", "credit", "free_provider_quota"
         if budget_usd is not None or budget_cny is not None:
             raise ValueError("Do not supply a cash budget for a free model; use a request/credit limit")
     else:
-        if (budget_usd is None) == (budget_cny is None):
-            raise ValueError("Specify exactly one API budget currency")
+        if max_credits is not None:
+            raise ValueError("Provider credits apply only to free credit-based models")
+        if budget_usd is None and budget_cny is None:
+            raise ValueError("A paid model requires --budget-usd or --budget-cny")
         budget = budget_cny if budget_cny is not None else budget_usd
         currency = "CNY" if budget_cny is not None else "USD"
-        if isinstance(budget, bool) or not isinstance(budget, (int, float)) or not math.isfinite(budget) or budget <= 0:
-            raise ValueError("A positive finite API budget is required")
         if plan["model"]["currency"] != currency:
             raise ValueError("Budget currency must match the configured model tariff")
         mode, unit, pricing_basis = "currency", "token_cost", plan["model"]["pricing_basis"]
+        request_limit = max_requests
     root, output = Path(plan["project_root"]), path.parent
     execution = {"budget": budget, "currency": currency, "mode": mode, "unit": unit,
+                 "request_limit": request_limit,
                  "budget_enforcement": ("shared pre-call SQLite request/credit reservation"
                                         if mode != "currency" else
                                         "shared pre-call SQLite reservation; configured prices"),
@@ -407,7 +407,7 @@ def run_worker(path: str | Path, variant: str) -> None:
     from .budget import install_budget_guard
     install_budget_guard(execution["budget_ledger"], limit=execution["budget"], currency=execution["currency"],
                          pricing_basis=execution["pricing_basis"], mode=execution.get("mode", "currency"),
-                         unit=execution.get("unit"))
+                         unit=execution.get("unit"), request_limit=execution.get("request_limit"))
     os.chdir(plan["upstream"])
     import vita.run as upstream_run
     import vita.domains.personalization.environment as personalization
@@ -497,11 +497,13 @@ def main(argv=None) -> None:
     create.add_argument("--user-limit", type=int)
     execute = sub.add_parser("execute", help="Run real evaluations after prerequisites and quota are configured")
     execute.add_argument("plan", type=Path)
-    budgets = execute.add_mutually_exclusive_group(required=True)
+    budgets = execute.add_mutually_exclusive_group()
     budgets.add_argument("--budget-usd", type=float)
     budgets.add_argument("--budget-cny", type=float)
-    budgets.add_argument("--max-requests", type=int, help="Free-tier request quota; one unit per model call")
-    budgets.add_argument("--max-credits", type=float, help="Free-tier provider credit quota")
+    quotas = execute.add_mutually_exclusive_group()
+    quotas.add_argument("--max-requests", type=int,
+                        help="Request cap; primary limit for free models, optional secondary cap for paid models")
+    quotas.add_argument("--max-credits", type=float, help="Free-tier provider credit quota")
     execute.add_argument("--budget-ledger", type=Path, help="Reuse one ledger across train/dev/test plans to enforce the total project quota")
     check = sub.add_parser("check")
     check.add_argument("plan", type=Path)

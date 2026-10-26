@@ -196,8 +196,13 @@ class BudgetLedger:
     def __init__(self, path: str | Path, limit_usd: float | None = None, *,
                  limit: float | None = None, currency: str = "USD",
                  pricing_basis: str = "configured_token_rates",
-                 mode: str = "currency", unit: str | None = None):
+                 mode: str = "currency", unit: str | None = None,
+                 request_limit: int | None = None):
         self.mode, self.unit = _mode(mode, unit)
+        if request_limit is not None and (
+                isinstance(request_limit, bool) or not isinstance(request_limit, int) or request_limit < 1):
+            raise ValueError("request_limit must be a positive integer or null")
+        self.request_limit = request_limit or 0
         if self.mode == "currency":
             self.currency = _currency(currency)
         else:
@@ -229,7 +234,8 @@ class BudgetLedger:
                     currency TEXT NOT NULL DEFAULT 'USD',
                     pricing_basis TEXT NOT NULL DEFAULT 'configured_token_rates',
                     mode TEXT NOT NULL DEFAULT 'currency',
-                    unit TEXT NOT NULL DEFAULT 'token_cost'
+                    unit TEXT NOT NULL DEFAULT 'token_cost',
+                    request_limit INTEGER NOT NULL DEFAULT 0
                 );
                 CREATE TABLE IF NOT EXISTS budget_calls (
                     id TEXT PRIMARY KEY, model TEXT NOT NULL,
@@ -248,7 +254,8 @@ class BudgetLedger:
                     ("pricing_basis", "TEXT", "'configured_token_rates'"),
                     ("mode", "TEXT", "'currency'"),
                     ("unit", "TEXT", "'token_cost'"),
-                    ("halted_reason", "TEXT", "''")):
+                    ("halted_reason", "TEXT", "''"),
+                    ("request_limit", "INTEGER", "0")):
                 if name not in meta_columns:
                     db.execute(f"ALTER TABLE budget_meta ADD COLUMN {name} {kind} NOT NULL DEFAULT {default}")
             columns = {row[1] for row in db.execute("PRAGMA table_info(budget_calls)")}
@@ -257,13 +264,13 @@ class BudgetLedger:
                                ("response_id", "TEXT")):
                 if name not in columns:
                     db.execute(f"ALTER TABLE budget_calls ADD COLUMN {name} {kind}")
-            db.execute("INSERT OR IGNORE INTO budget_meta(singleton,limit_nano,currency,pricing_basis,mode,unit) VALUES (1,?,?,?,?,?)",
-                       (self.limit_nano, self.currency, self.pricing_basis, self.mode, self.unit))
-            existing = db.execute("SELECT limit_nano,currency,pricing_basis,mode,unit FROM budget_meta WHERE singleton=1").fetchone()
+            db.execute("INSERT OR IGNORE INTO budget_meta(singleton,limit_nano,currency,pricing_basis,mode,unit,request_limit) VALUES (1,?,?,?,?,?,?)",
+                       (self.limit_nano, self.currency, self.pricing_basis, self.mode, self.unit, self.request_limit))
+            existing = db.execute("SELECT limit_nano,currency,pricing_basis,mode,unit,request_limit FROM budget_meta WHERE singleton=1").fetchone()
             if (existing["limit_nano"] != self.limit_nano or existing["currency"] != self.currency
                     or existing["pricing_basis"] != self.pricing_basis or existing["mode"] != self.mode
-                    or existing["unit"] != self.unit):
-                raise ValueError("Existing budget ledger has a different immutable limit, currency, pricing basis, mode or unit")
+                    or existing["unit"] != self.unit or existing["request_limit"] != self.request_limit):
+                raise ValueError("Existing budget ledger has a different immutable limit, currency, pricing basis, mode, unit or request limit")
 
     @contextmanager
     def _connect(self):
@@ -306,6 +313,10 @@ class BudgetLedger:
             if meta["halted"]:
                 reason = meta["halted_reason"] or "observed reservation overrun"
                 raise BudgetExceeded(f"Budget ledger halted after {reason}")
+            if meta["request_limit"]:
+                attempted = db.execute("SELECT COUNT(*) FROM budget_calls").fetchone()[0]
+                if attempted >= meta["request_limit"]:
+                    raise BudgetExceeded("Request quota exhausted for the next API request")
             if held + amount > meta["limit_nano"]:
                 raise BudgetExceeded("Insufficient budget for the next bounded API request")
             db.execute("""INSERT INTO budget_calls
@@ -395,8 +406,13 @@ class BudgetLedger:
                    "measured": measured, "actual_total": measured if complete else None}
         token_stats = {"prompt_tokens": tokens["prompt"], "completion_tokens": tokens["completion"],
                        "total_tokens": tokens["prompt"] + tokens["completion"]}
+        requests = sum(r["n"] for r in rows)
         base = {"mode": meta["mode"], "unit": meta["unit"], "currency": self.currency,
                 "pricing_basis": self.pricing_basis, **token_stats,
+                "requests": requests,
+                "request_limit": meta["request_limit"] or None,
+                "remaining_requests": (max(0, meta["request_limit"] - requests)
+                                       if meta["request_limit"] else None),
                 "cost_complete": complete,
                 "halted": bool(meta["halted"]), "halted_reason": meta["halted_reason"] or None,
                 "counts": {r["state"]: r["n"] for r in rows},
@@ -497,7 +513,8 @@ class _Completions:
 def install_budget_guard(path: str | Path, limit_usd: float | None = None, *,
                          limit: float | None = None, currency: str = "USD",
                          pricing_basis: str = "configured_token_rates",
-                         mode: str = "currency", unit: str | None = None) -> BudgetLedger:
+                         mode: str = "currency", unit: str | None = None,
+                         request_limit: int | None = None) -> BudgetLedger:
     """Patch the official client factory; install before launching benchmark runs.
 
     Returns the ledger for reporting. Reinstallation targets the same original
@@ -510,7 +527,8 @@ def install_budget_guard(path: str | Path, limit_usd: float | None = None, *,
     """
     from vita.utils import llm_utils
     ledger = BudgetLedger(path, limit_usd, limit=limit, currency=currency,
-                          pricing_basis=pricing_basis, mode=mode, unit=unit)
+                          pricing_basis=pricing_basis, mode=mode, unit=unit,
+                          request_limit=request_limit)
     original = getattr(llm_utils._get_client, "_budget_original", llm_utils._get_client)
 
     def guarded_factory(base_url, api_key, max_retries):

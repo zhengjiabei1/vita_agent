@@ -2,7 +2,9 @@
 
 `scripts/run_experiments.py` 运行真实官方 Agent/User/Evaluator，不会把模拟演示转成 benchmark 分数。`plan` 只做本地检查和记录；`execute` 才调用模型。所有实验组合使用同一 runner、同一模型配置、用户集合、seed、trial 数、步骤预算和并发。
 
-**2026-10-27 状态：** 免费模型 `deepseek-v4.1-flash-free` 的请求数账本、计划创建和校验已通过；实际预检返回 HTTP 429 `FreeUsageLimitError`，因此没有执行任何评测。可复现的 prefix2 训练计划位于本地 `artifacts/free-train-prefix2-final3/plan.json`（gitignored，SHA-256 `957e08f3eb40052ac4283958b4d101b81ed0df824df39d4295779e216e11bc2e`，源码/数据/配置变化后必须重建）。恢复额度或经授权换服务后，先跑同模型 baseline，再跑 memory/skills/full 和保留 test。阻塞证据见 [reports/2026-10-27-provider-quota](../reports/2026-10-27-provider-quota/)。
+**2026-10-27 状态：** 免费模型 `deepseek-v4.1-flash-free` 在直接 API 上返回 HTTP 429 `FreeUsageLimitError`。经用户明确授权后，付费 OpenCode Go 端点 `https://opencode.ai/inference/go/openai/v1` 连通成功；它要求额外的 `x-opencode-session` 请求头。预检验证了工具调用、JSON、106,659 Token 长上下文和 usage。
+
+随后在新模型 `deepseek-v4.1-flash` 上完成 1 个训练用户 × 2 子任务的 baseline/harness/memory 各 1 trial，三臂均 **0.0**；共享 ledger 用 **176/200 请求**，估算 **0.30838665 USD**。真实结果、Token 和限制见 [reports/2026-10-27-go-train-prefix2](../reports/2026-10-27-go-train-prefix2/)。剩余 24 请求不足以完成有效 skills/full 五组消融；需要新额度并新建计划。免费额度阻塞记录见 [reports/2026-10-27-provider-quota](../reports/2026-10-27-provider-quota/)。
 
 默认比较 full-context baseline、full-context + harness、structured memory、full-context + frozen skills、structured memory + harness + frozen skills。结构化记忆的当前轮提取属于记忆模块的处理；baseline 保留官方 full-context 记忆。技能单独收益只用 `skills - baseline`，不能用 `full - baseline` 代替。
 
@@ -73,6 +75,21 @@ OPENCODE_API_KEY="<environment only>" \
 - 训练、开发、测试、记忆抽取、模拟用户、评测器和离线反思必须复用同一 `--budget-ledger`，否则只是每个计划各自限额，不是总限额。
 - 供应商日额度、模型可用性和实际扣减规则仍是最终约束；本地请求计数只防止超过你显式授权的上限。
 - 先用 `scripts/verify_provider.py` 做工具调用、JSON、长上下文和 usage 预检；它同样走 ledger，遇到 429 立即停止并记录。预检通过只说明接口兼容，不是 benchmark 分数。
+
+### 付费 OpenCode Go
+
+如果免费额度不可用且用户明确授权，可用 `examples/opencode-go-deepseek.yaml`。该端点需要 `OPENCODE_SESSION_ID` 作为 `x-opencode-session` 请求头；API key 和 session 都只从环境读取。付费模式必须给现金上限，可同时给请求上限：
+
+```bash
+python scripts/verify_provider.py \
+  --model-config examples/opencode-go-deepseek.yaml --model deepseek-v4.1-flash \
+  --budget-usd 0.25 --ledger artifacts/go-preflight.sqlite3 --long-context-tokens 120000
+
+python scripts/run_experiments.py execute artifacts/go-train-prefix2-v1/plan.json \
+  --budget-usd 1.0 --max-requests 200 --budget-ledger artifacts/go-shared-budget.sqlite3
+```
+
+请求上限和现金上限同时生效；任一耗尽都会停止后续请求。实际 token 价格是配置估计，不是供应商发票。
 
 ### 离线反思与 v2 技能快照
 

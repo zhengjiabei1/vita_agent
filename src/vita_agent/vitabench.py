@@ -327,7 +327,8 @@ def make_guarded_agent_class():
                                  + timedelta(microseconds=self._user_turn)).isoformat()
                     self.memory.update([{"type": "conversation", "timestamp": turn_time,
                         "domain": self.memory.domain or "global",
-                        "content": {"role": "user", "content": item.content}}])
+                        "content": {"role": "user", "content": item.content}}],
+                        llm=self.llm, llm_args=self.llm_args)
                 elif item.role == "user" and self.enable_guards:
                     self._user_turn += 1
                     evidence = Evidence(f"turn-{self._user_turn}", "current-user", item.content or "",

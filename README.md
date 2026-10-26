@@ -115,8 +115,13 @@ python scripts/run_experiments.py execute artifacts/free-train-prefix2-v2/plan.j
   --max-requests 3 --budget-ledger artifacts/free-shared.sqlite3
 ```
 
-截至 2026-10-27，已完成一次真实 DeepSeek 训练集短前缀试验：1 个训练用户、前 2 个子任务、1 次 trial，baseline 和 harness 两组平均分均为 **0.0**。零分诊断显示 baseline 选择了高 GI 外卖和错误酒店品牌，harness 多次阻塞且最终无外卖订单；没有评分器缺陷证据。这不是保留测试集成绩，也不能说明总体有效或无效。官方 `agent_cost` 聚合值缺失，成本增长率保持 `null`。
+截至 2026-10-27，已完成两轮真实训练集短前缀试验：
 
-OpenCode 免费模型 `deepseek-v4.1-flash-free` 的请求数/积分模式、计划校验和 429 halt 已实现；实际预检返回 HTTP 429 `FreeUsageLimitError`，因此没有新模型 baseline 或正式五组结果，真实调用已停止。付费 DeepSeek 调用保持暂停。
+- 旧 DeepSeek：1 个训练用户、前 2 个子任务、baseline/harness 各 1 trial，两组均 **0.0**。
+- 新 OpenCode Go `deepseek-v4.1-flash`：同用户、同 2 子任务、baseline/harness/memory 各 1 trial，三臂均 **0.0**；update 子集均 0.0。baseline/harness 到 `max_steps`，memory `agent_stop`。memory 选到喜来登品牌，但仍缺电话叫醒、支付，外卖为鱼肉；总分没有提升。
 
-当前成果适合描述为“实现并测试了上述机制，完成官方接口接入、小规模真实训练试跑和零分诊断”。简历中的提升数字仍无实验支持。验证记录见 [verification.md](docs/verification.md)，零分诊断见 [reports/2026-10-27-zero-score-diagnosis](reports/2026-10-27-zero-score-diagnosis/)，额度阻塞见 [reports/2026-10-27-provider-quota](reports/2026-10-27-provider-quota/)，换平台继续开发见 [HANDOFF.md](HANDOFF.md)。
+Go 实验用 **176/200 请求**、输入 1,828,931、输出 56,745 Token，按配置单价估算 **0.30838665 USD**；剩余 24 请求不足以完成有效的 skills/full 五组消融和保留测试。工具调用、JSON、106,659 Token 长上下文和 usage 已通过预检。
+
+这些都不是保留测试集成绩，也不能说明总体有效或无效。没有评分器缺陷证据，也没有证明任何模块收益。官方 `agent_cost` 聚合值缺失，成本增长率保持 `null`。
+
+当前成果适合描述为“实现并测试了上述机制，完成官方接口接入、新模型训练试跑和零分诊断”。简历中的提升数字仍无实验支持。验证记录见 [verification.md](docs/verification.md)，Go 结果见 [reports/2026-10-27-go-train-prefix2](reports/2026-10-27-go-train-prefix2/)，零分诊断见 [reports/2026-10-27-zero-score-diagnosis](reports/2026-10-27-zero-score-diagnosis/)，额度记录见 [reports/2026-10-27-provider-quota](reports/2026-10-27-provider-quota/)，继续开发见 [HANDOFF.md](HANDOFF.md)。

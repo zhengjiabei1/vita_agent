@@ -73,40 +73,53 @@ def main(argv=None) -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--model-config", required=True, type=Path)
     parser.add_argument("--model", required=True)
-    parser.add_argument("--max-requests", type=int, required=True,
-                        help="Free request quota; at least 3 requests are needed for all checks")
     parser.add_argument("--ledger", required=True, type=Path)
     parser.add_argument("--long-context-tokens", type=int, default=120_000)
     parser.add_argument("--output", type=Path)
+    quota = parser.add_mutually_exclusive_group(required=True)
+    quota.add_argument("--max-requests", type=int)
+    quota.add_argument("--budget-usd", type=float)
     args = parser.parse_args(argv)
-    if args.max_requests < 3:
-        parser.exit(2, "error: --max-requests must cover tool, JSON and long-context checks\n")
 
     plan = model_preflight(args.model_config, args.model)
     if not plan["ready"]:
         parser.exit(2, "error: credential environment variable is not set\n")
     config = _merged_config(args.model_config.resolve(), args.model)
-    if plan["billing"] != "free" or plan["free_quota"]["unit"] != "request":
-        parser.exit(2, "error: this preflight is for free request-quota models; use the experiment runner otherwise\n")
-
     from openai import OpenAI
-    client = OpenAI(base_url=config["base_url"], api_key=config["api_key"], max_retries=0)
-    ledger = BudgetLedger(args.ledger, limit=args.max_requests, currency="FREE",
-                          pricing_basis="free_provider_quota", mode="requests")
+    client = OpenAI(base_url=config["base_url"], api_key=config["api_key"], max_retries=0,
+                    default_headers=config.get("extra_headers") or {})
+    if plan["billing"] == "free":
+        if plan["free_quota"]["unit"] != "request":
+            parser.exit(2, "error: free credit-based models are not supported by this preflight\n")
+        if args.max_requests is None or args.max_requests < 3:
+            parser.exit(2, "error: --max-requests must be at least 3 for tool, JSON and long-context checks\n")
+        ledger = BudgetLedger(args.ledger, limit=args.max_requests, currency="FREE",
+                              pricing_basis="free_provider_quota", mode="requests")
+        quota_mode, quota_limit = "requests", args.max_requests
+    else:
+        if args.budget_usd is None or not 0 < args.budget_usd < float("inf"):
+            parser.exit(2, "error: paid models require a positive finite --budget-usd\n")
+        if plan["currency"] != "USD":
+            parser.exit(2, "error: this preflight currently supports USD paid models only\n")
+        ledger = BudgetLedger(args.ledger, limit=args.budget_usd, currency="USD",
+                              pricing_basis=plan["pricing_basis"], mode="currency")
+        quota_mode, quota_limit = "currency", args.budget_usd
     completions = _Completions(client.chat.completions, ledger, {args.model: config})
     output = args.output or Path("artifacts/provider-preflight") / (
         datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ") + "-" + re.sub(r"[^A-Za-z0-9_.-]", "_", args.model) + ".json")
     output.parent.mkdir(parents=True, exist_ok=True)
     report = {"schema_version": 1, "created_at": datetime.now(timezone.utc).isoformat(),
               "model": args.model, "endpoint_host": plan["endpoint_host"], "billing": plan["billing"],
-              "quota_mode": "requests", "quota_limit": args.max_requests,
+              "quota_mode": quota_mode, "quota_limit": quota_limit,
               "output_limits": {"max_tokens": config.get("max_tokens")},
               "tests": [], "status": "running"}
+
+    base = {key: config[key] for key in ("temperature", "extra_body", "top_p", "seed") if key in config}
 
     def call(name: str, **request) -> tuple[dict, str]:
         started = time.monotonic()
         try:
-            response = completions.create(model=args.model, **request)
+            response = completions.create(model=args.model, **base, **request)
         except Exception as exc:
             item = {"name": name, "ok": False, "latency_s": round(time.monotonic() - started, 3),
                     **_safe_error(exc)}
@@ -133,9 +146,8 @@ def main(argv=None) -> None:
                 "a": {"type": "integer"}, "b": {"type": "integer"}},
                 "required": ["a", "b"], "additionalProperties": False}}}]
         tool_test, _ = call(
-            "tool_call", messages=[{"role": "user", "content": "Use the add_numbers tool with a=2 and b=3."}],
-            tools=tools, tool_choice={"type": "function", "function": {"name": "add_numbers"}},
-            max_tokens=256)
+            "tool_call", messages=[{"role": "user", "content": "Use the add_numbers tool with a=2 and b=3. You must use the tool."}],
+            tools=tools, tool_choice="auto", max_tokens=256)
         tool_test["ok"] = bool(tool_test.get("tool_calls"))
         json_test, json_text = call("json_object", messages=[
             {"role": "user", "content": "Return exactly one JSON object: {\"ok\": true}."}],
@@ -146,7 +158,7 @@ def main(argv=None) -> None:
             json_test["json_parse_ok"] = False
         json_test["ok"] = json_test["json_parse_ok"]
         prompt, needle = _long_prompt(args.long_context_tokens)
-        long_test, long_text = call("long_context", messages=[{"role": "user", "content": prompt}], max_tokens=64)
+        long_test, long_text = call("long_context", messages=[{"role": "user", "content": prompt}], max_tokens=512)
         long_test["expected_needle_sha256"] = hashlib.sha256(needle.encode()).hexdigest()
         long_test["contains_expected_needle"] = needle in long_text
         long_test["ok"] = long_test["contains_expected_needle"]

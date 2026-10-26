@@ -311,6 +311,20 @@ def test_installer_free_mode_reports_zero_cash_without_fake_tariff(monkeypatch, 
     assert ledger.summary()["held_requests"] == 0
 
 
+def test_request_limit_caps_paid_calls_and_is_immutable(tmp_path):
+    path = tmp_path / "paid.db"
+    ledger = BudgetLedger(path, limit=100, currency="USD", request_limit=2)
+    ledger.reserve("model", 1000, 100, 2, 8)
+    ledger.reserve("model", 1000, 100, 2, 8)
+    with pytest.raises(BudgetExceeded, match="Request quota"):
+        ledger.reserve("model", 1000, 100, 2, 8)
+    summary = ledger.summary()
+    assert summary["request_limit"] == 2 and summary["requests"] == 2
+    assert summary["remaining_requests"] == 0
+    with pytest.raises(ValueError, match="immutable"):
+        BudgetLedger(path, limit=100, currency="USD", request_limit=3)
+
+
 def test_ledger_mode_is_immutable_across_phases(tmp_path):
     path = tmp_path / "shared.db"
     BudgetLedger(path, limit=3, currency="FREE", pricing_basis="free_provider_quota", mode="requests")

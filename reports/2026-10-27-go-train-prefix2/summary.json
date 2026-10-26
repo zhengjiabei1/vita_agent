@@ -1,0 +1,197 @@
+{
+  "schema_version": 2,
+  "recorded_date": "2026-10-27",
+  "status": "real_training_prefix_only",
+  "provider": "OpenCode Go",
+  "model": "deepseek-v4.1-flash",
+  "endpoint_host": "opencode.ai",
+  "scope": "1 training user x first 2 subtasks x 1 trial per arm; NOT a held-out test result",
+  "task_hash": "f4cc6c8e8ad6",
+  "dataset_sha256": "c76985f042b0be3f751e7a97261e3fe70f6e96402bc6de7f358e025433c523fe",
+  "seed": 42,
+  "max_steps": 20,
+  "arms": [
+    {
+      "arm": "baseline",
+      "task_hash": "f4cc6c8e8ad6",
+      "reward": 0.0,
+      "subtask_rewards": {
+        "subtask_0_reward": 0.0,
+        "subtask_1_reward": 0.0
+      },
+      "update_subset_rewards": 0.0,
+      "termination_reason": "max_steps",
+      "duration_seconds": 56.75,
+      "message_count": 36,
+      "tool_call_count": 9,
+      "tool_errors": 0,
+      "guard_or_fallback_blocks": 0,
+      "message_usage": {
+        "prompt_tokens": 541850,
+        "completion_tokens": 1791,
+        "total_tokens": 543641
+      },
+      "orders": {
+        "delivery": {
+          "status": "unpaid",
+          "total_price": 54.0,
+          "product_tags": [
+            "牛肉",
+            "盖饭",
+            "素菜",
+            "辛辣",
+            "酸辣",
+            "高GI"
+          ]
+        },
+        "hotel": {
+          "orders": 2,
+          "all_paid": true,
+          "brand_is_sheraton": false,
+          "has_phone_wakeup": true,
+          "dates": [
+            "2026-04-03",
+            "2026-04-04"
+          ]
+        }
+      },
+      "observed_risks": [
+        "delivery_high_gi_or_processed",
+        "delivery_unpaid",
+        "hotel_brand_not_sheraton"
+      ]
+    },
+    {
+      "arm": "harness",
+      "task_hash": "f4cc6c8e8ad6",
+      "reward": 0.0,
+      "subtask_rewards": {
+        "subtask_0_reward": 0.0,
+        "subtask_1_reward": 0.0
+      },
+      "update_subset_rewards": 0.0,
+      "termination_reason": "max_steps",
+      "duration_seconds": 70.74,
+      "message_count": 43,
+      "tool_call_count": 12,
+      "tool_errors": 0,
+      "guard_or_fallback_blocks": 4,
+      "message_usage": {
+        "prompt_tokens": 909865,
+        "completion_tokens": 3449,
+        "total_tokens": 913314
+      },
+      "orders": {
+        "delivery": {
+          "status": "paid",
+          "total_price": 54.0,
+          "product_tags": [
+            "牛肉",
+            "盖饭",
+            "素菜",
+            "辛辣",
+            "酸辣",
+            "高GI"
+          ]
+        },
+        "hotel": {
+          "orders": 2,
+          "all_paid": false,
+          "brand_is_sheraton": false,
+          "has_phone_wakeup": true,
+          "dates": [
+            "2026-04-03",
+            "2026-04-04"
+          ]
+        }
+      },
+      "observed_risks": [
+        "delivery_high_gi_or_processed",
+        "hotel_brand_not_sheraton",
+        "hotel_unpaid"
+      ]
+    },
+    {
+      "arm": "memory",
+      "task_hash": "f4cc6c8e8ad6",
+      "reward": 0.0,
+      "subtask_rewards": {
+        "subtask_0_reward": 0.0,
+        "subtask_1_reward": 0.0
+      },
+      "update_subset_rewards": 0.0,
+      "termination_reason": "agent_stop",
+      "duration_seconds": 137.63,
+      "message_count": 37,
+      "tool_call_count": 9,
+      "tool_errors": 0,
+      "guard_or_fallback_blocks": 0,
+      "message_usage": {
+        "prompt_tokens": 234753,
+        "completion_tokens": 1837,
+        "total_tokens": 236590
+      },
+      "orders": {
+        "delivery": {
+          "status": "paid",
+          "total_price": 30.0,
+          "product_tags": [
+            "午餐",
+            "快餐",
+            "鱼肉",
+            "麻辣"
+          ]
+        },
+        "hotel": {
+          "orders": 2,
+          "all_paid": false,
+          "brand_is_sheraton": true,
+          "has_phone_wakeup": false,
+          "dates": [
+            "2026-04-03",
+            "2026-04-04"
+          ]
+        }
+      },
+      "observed_risks": [
+        "delivery_no_accepted_meat",
+        "hotel_no_phone_wakeup",
+        "hotel_unpaid"
+      ]
+    }
+  ],
+  "shared_ledger": {
+    "requests": 176,
+    "request_limit": 200,
+    "remaining_requests": 24,
+    "prompt_tokens": 1828931,
+    "completion_tokens": 56745,
+    "total_tokens": 1885676,
+    "measured_usd_estimate": 0.30838665,
+    "currency": "USD",
+    "pricing_basis": "configured_token_rates",
+    "note": "Token usage valued at configured OpenCode model-list prices; not a provider invoice. Provider list_cost/cache discounts may differ."
+  },
+  "comparisons": {
+    "baseline_vs_harness_delta": 0.0,
+    "baseline_vs_memory_delta": 0.0,
+    "paired_user_confidence_interval": null,
+    "reason_no_ci": "Only one user; no user-level bootstrap interval."
+  },
+  "conclusion": {
+    "performance_improvement_established": false,
+    "all_three_arms_scored_zero": true,
+    "evidence": [
+      "Baseline and harness both ended at MAX_STEPS with 0.0 subtask rewards.",
+      "Baseline and harness selected a high-GI delivery product and a non-Sheraton hotel brand.",
+      "Memory selected a Sheraton-brand hotel, but the room lacked the required phone-wakeup service and the delivery product was fish rather than the rubric's accepted meat.",
+      "No tool errors appeared in any arm; failures are preference/constraint adherence, not tool crashes."
+    ],
+    "not_established": [
+      "No module benefit or causal effect.",
+      "No held-out test score.",
+      "No multi-trial stability estimate.",
+      "No skills/full result because no validated frozen skill bank or remaining quota."
+    ]
+  }
+}
