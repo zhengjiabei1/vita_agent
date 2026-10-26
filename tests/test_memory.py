@@ -147,6 +147,42 @@ def test_unsupported_budget_units_and_per_person_scope_do_not_become_total_price
         "total_price": 100.5, "cuisine": "italian"}
 
 
+@pytest.mark.parametrize("text, expected", [
+    ("酒店还是得选万豪集团下的，管理服务环境什么的都要好一些", "marriott"),
+    ("万豪下面的那些酒店也就属喜来登最住得舒心了", "sheraton"),
+    ("以后订酒店也只认准亚朵", "atour"),
+    ("喜来登住得真舒服，下次还住", "sheraton"),
+    ("我最喜欢全季，有吗？", "ji_hotel"),
+])
+def test_explicit_hotel_brand_preference_is_soft_evidence(text, expected):
+    extracted = {item["slot"]: item for item in extract_preferences(evidence(text=text))}
+    assert extracted["hotel_brand"]["value"] == expected
+    assert extracted["hotel_brand"]["strength"] == "soft"
+    assert extracted["hotel_brand"]["quote"] in text
+
+
+def test_later_hotel_brand_preference_supersedes_older_one():
+    with PreferenceMemory() as memory:
+        first = evidence("brand-1", "以后订酒店也只认准亚朵", 1)
+        second = evidence("brand-2", "现在更喜欢喜来登，住得真舒服", 2)
+        for item in extract_preferences(first):
+            memory.remember(first, **item)
+        for item in extract_preferences(second):
+            memory.remember(second, **item)
+        active = memory.active("alice", domain="global", strength="soft")
+        assert [(p.slot, p.value, p.status) for p in active] == [("hotel_brand", "sheraton", "active")]
+        assert [p.value for p in memory.history("alice", "hotel_brand")] == ["atour", "sheraton"]
+
+
+@pytest.mark.parametrize("text", [
+    "我到万豪了，说实话这次住得一般般，隔音不太好",
+    "这次住的希尔顿让我很失望",
+    "帮我查查成都万豪集团的酒店",
+])
+def test_hotel_brand_mention_without_positive_preference_is_not_extracted(text):
+    assert "hotel_brand" not in extract_preferences(evidence(text=text))
+
+
 @pytest.mark.parametrize("text", [
     "我对花生不过敏。", "我对花生不再过敏。", "我可能对花生过敏。",
     "我对花生可能过敏。", "如果我对花生过敏就避开它。", "我对花生过敏吗？",

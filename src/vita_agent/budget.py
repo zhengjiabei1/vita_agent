@@ -1,9 +1,18 @@
 """Shared API budget reservations for official VitaBench chat completions.
 
-The ledger reserves a conservative token-byte estimate before each API request,
-then settles from reported token usage. Network failures and missing usage keep
-their full reservation. SDK retries are disabled. All official Agent, User and
-Evaluator calls using ``llm_utils._get_client`` share this accounting.
+Two accounting modes are supported:
+
+* ``currency`` reserves a conservative token-price estimate before each request,
+  then settles from reported usage. This is the original paid-API mode.
+* ``requests`` / ``credits`` reserve provider quota units for a genuinely free
+  endpoint. Zero prices are never used as a stand-in for a free tariff: the
+  model config must declare ``billing: free`` and the ledger records one unit
+  per request (or a configured credit cost). Token usage is still recorded.
+
+Network failures and missing usage keep their full reservation. SDK retries are
+disabled. All official Agent, User and Evaluator calls using
+``llm_utils._get_client`` share this accounting. Provider 429/quota exhaustion
+halts the shared ledger so later phases cannot continue spending quota.
 
 This is an admission control guard, not a provider billing guarantee: tariffs,
 tokenization, hidden usage and provider-side retries can differ. Any observed
@@ -25,6 +34,8 @@ from uuid import uuid4
 
 
 NANOUNITS = 1_000_000_000
+MODES = ("currency", "requests", "credits")
+HALT_REASONS = ("provider_quota_exhausted", "reservation_overrun")
 
 
 class BudgetExceeded(RuntimeError):
@@ -61,9 +72,55 @@ def _charge(prompt: int, completion: int, input_price: float, output_price: floa
 
 
 def _currency(value: str) -> str:
-    if value not in ("USD", "CNY"):
-        raise ValueError("Budget currency must be explicitly USD or CNY; no exchange-rate conversion is performed")
+    if value not in ("USD", "CNY", "FREE"):
+        raise ValueError("Budget currency must be explicitly USD, CNY or FREE; no exchange-rate conversion is performed")
     return value
+
+
+def _mode(value: str, unit: str | None) -> tuple[str, str]:
+    if value not in MODES:
+        raise ValueError("Budget mode must be currency, requests or credits")
+    if value == "currency":
+        if unit not in (None, "token_cost"):
+            raise ValueError("Currency mode always uses token_cost units")
+        return value, "token_cost"
+    expected = "request" if value == "requests" else "credit"
+    if unit not in (None, expected):
+        raise ValueError(f"{value} mode requires {expected} units")
+    return value, expected
+
+
+def _units(value: Any, name: str, *, mode: str) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or value <= 0:
+        raise ValueError(f"{name} must be a finite positive number")
+    if mode == "requests" and float(value) != int(value):
+        raise ValueError("Request quota units must be whole requests")
+    return float(value)
+
+
+def _provider_quota_error(exc: BaseException) -> bool:
+    """Recognise a provider-side free-quota/rate-limit stop.
+
+    This deliberately does not treat every network error as quota exhaustion;
+    only an explicit 429/402 status or a known quota message halts the ledger.
+    """
+    status = getattr(exc, "status_code", None)
+    if isinstance(status, int) and status in (402, 429):
+        return True
+    text = f"{exc}".casefold()
+    return any(marker in text for marker in (
+        "free usage limit", "quota", "rate limit", "insufficient account funds",
+        "too many requests", "resource_exhausted"))
+
+
+def _free_units(model_config: Mapping[str, Any], unit: str) -> float:
+    if unit == "request":
+        return 1.0
+    quota = model_config.get("free_quota")
+    if not isinstance(quota, Mapping):
+        raise ValueError("Credit accounting requires an explicit free_quota block")
+    value = quota.get("credit_per_request")
+    return _units(value, "credit_per_request", mode="credits")
 
 
 def _tariff(model_config: Mapping[str, Any], currency: str) -> tuple[float, float]:
@@ -107,17 +164,25 @@ class Reservation:
     input_token_bound: int
     output_token_limit: int
     currency: str = "USD"
+    mode: str = "currency"
+    unit: str = "token_cost"
 
     @property
     def reserved_usd(self):
-        if self.currency != "USD":
+        if self.mode != "currency" or self.currency != "USD":
             raise AttributeError("This reservation is not denominated in USD")
         return self.reserved
 
     @property
     def reserved_cny(self):
-        if self.currency != "CNY":
+        if self.mode != "currency" or self.currency != "CNY":
             raise AttributeError("This reservation is not denominated in CNY")
+        return self.reserved
+
+    @property
+    def reserved_units(self):
+        if self.mode == "currency":
+            raise AttributeError("Currency reservations use token prices, not quota units")
         return self.reserved
 
 
@@ -130,14 +195,25 @@ class BudgetLedger:
 
     def __init__(self, path: str | Path, limit_usd: float | None = None, *,
                  limit: float | None = None, currency: str = "USD",
-                 pricing_basis: str = "configured_token_rates"):
-        self.currency = _currency(currency)
-        if pricing_basis not in ("configured_token_rates", "peak_uncached_upper_bound"):
+                 pricing_basis: str = "configured_token_rates",
+                 mode: str = "currency", unit: str | None = None):
+        self.mode, self.unit = _mode(mode, unit)
+        if self.mode == "currency":
+            self.currency = _currency(currency)
+        else:
+            if currency not in ("USD", "FREE"):
+                raise ValueError("Free quota ledgers use currency='FREE', not a monetary currency")
+            if pricing_basis not in ("free_provider_quota", "configured_token_rates"):
+                raise ValueError("Free quota ledgers require pricing_basis='free_provider_quota'")
+            self.currency = "FREE"
+        if pricing_basis not in ("configured_token_rates", "peak_uncached_upper_bound", "free_provider_quota"):
             raise ValueError("Unsupported pricing basis")
         self.pricing_basis = pricing_basis
-        if limit_usd is not None and (limit is not None or currency != "USD"):
+        if limit_usd is not None and (limit is not None or currency != "USD" or self.mode != "currency"):
             raise ValueError("Use limit=<amount>, currency='CNY' for CNY; do not mix limit_usd with a currency or limit")
         amount = limit_usd if limit_usd is not None else limit
+        if self.mode == "requests" and isinstance(amount, float) and amount != int(amount):
+            raise ValueError("Request quota must be a whole number of requests")
         self.path = str(Path(path).resolve())
         if str(path) == ":memory:":
             raise ValueError("A persistent file is required for shared budget accounting")
@@ -149,8 +225,11 @@ class BudgetLedger:
                 CREATE TABLE IF NOT EXISTS budget_meta (
                     singleton INTEGER PRIMARY KEY CHECK(singleton=1),
                     limit_nano INTEGER NOT NULL, halted INTEGER NOT NULL DEFAULT 0,
+                    halted_reason TEXT NOT NULL DEFAULT '',
                     currency TEXT NOT NULL DEFAULT 'USD',
-                    pricing_basis TEXT NOT NULL DEFAULT 'configured_token_rates'
+                    pricing_basis TEXT NOT NULL DEFAULT 'configured_token_rates',
+                    mode TEXT NOT NULL DEFAULT 'currency',
+                    unit TEXT NOT NULL DEFAULT 'token_cost'
                 );
                 CREATE TABLE IF NOT EXISTS budget_calls (
                     id TEXT PRIMARY KEY, model TEXT NOT NULL,
@@ -163,20 +242,28 @@ class BudgetLedger:
                 );
             """)
             db.execute("BEGIN IMMEDIATE")
-            if "currency" not in {row[1] for row in db.execute("PRAGMA table_info(budget_meta)")}:
-                db.execute("ALTER TABLE budget_meta ADD COLUMN currency TEXT NOT NULL DEFAULT 'USD'")
-            if "pricing_basis" not in {row[1] for row in db.execute("PRAGMA table_info(budget_meta)")}:
-                db.execute("ALTER TABLE budget_meta ADD COLUMN pricing_basis TEXT NOT NULL DEFAULT 'configured_token_rates'")
+            meta_columns = {row[1] for row in db.execute("PRAGMA table_info(budget_meta)")}
+            for name, kind, default in (
+                    ("currency", "TEXT", "'USD'"),
+                    ("pricing_basis", "TEXT", "'configured_token_rates'"),
+                    ("mode", "TEXT", "'currency'"),
+                    ("unit", "TEXT", "'token_cost'"),
+                    ("halted_reason", "TEXT", "''")):
+                if name not in meta_columns:
+                    db.execute(f"ALTER TABLE budget_meta ADD COLUMN {name} {kind} NOT NULL DEFAULT {default}")
             columns = {row[1] for row in db.execute("PRAGMA table_info(budget_calls)")}
             for name, kind in (("cached_input_price", "REAL"), ("prompt_cache_hit_tokens", "INTEGER"),
                                ("prompt_cache_miss_tokens", "INTEGER"), ("cache_usage_reported", "INTEGER"),
                                ("response_id", "TEXT")):
                 if name not in columns:
                     db.execute(f"ALTER TABLE budget_calls ADD COLUMN {name} {kind}")
-            db.execute("INSERT OR IGNORE INTO budget_meta(singleton,limit_nano,currency,pricing_basis) VALUES (1,?,?,?)", (self.limit_nano, self.currency, self.pricing_basis))
-            existing = db.execute("SELECT limit_nano,currency,pricing_basis FROM budget_meta WHERE singleton=1").fetchone()
-            if existing["limit_nano"] != self.limit_nano or existing["currency"] != self.currency or existing["pricing_basis"] != self.pricing_basis:
-                raise ValueError("Existing budget ledger has a different immutable spending limit, currency or pricing basis")
+            db.execute("INSERT OR IGNORE INTO budget_meta(singleton,limit_nano,currency,pricing_basis,mode,unit) VALUES (1,?,?,?,?,?)",
+                       (self.limit_nano, self.currency, self.pricing_basis, self.mode, self.unit))
+            existing = db.execute("SELECT limit_nano,currency,pricing_basis,mode,unit FROM budget_meta WHERE singleton=1").fetchone()
+            if (existing["limit_nano"] != self.limit_nano or existing["currency"] != self.currency
+                    or existing["pricing_basis"] != self.pricing_basis or existing["mode"] != self.mode
+                    or existing["unit"] != self.unit):
+                raise ValueError("Existing budget ledger has a different immutable limit, currency, pricing basis, mode or unit")
 
     @contextmanager
     def _connect(self):
@@ -189,32 +276,44 @@ class BudgetLedger:
             db.close()
 
     def reserve(self, model: str, input_token_bound: int, output_token_limit: int,
-                input_price: float, output_price: float, *, cached_input_price: float | None = None) -> Reservation:
+                input_price: float = 0.0, output_price: float = 0.0, *,
+                cached_input_price: float | None = None, units: float | None = None) -> Reservation:
         if not isinstance(model, str) or not model.strip() or len(model) > 256:
             raise ValueError("A nonempty model name of at most 256 characters is required")
         input_token_bound = _tokens(input_token_bound, "input_token_bound", positive=True)
         output_token_limit = _tokens(output_token_limit, "output_token_limit", positive=True)
-        input_price = _positive(input_price, "prompt token price")
-        output_price = _positive(output_price, "completion token price")
-        if cached_input_price is not None:
-            if (isinstance(cached_input_price, bool) or not isinstance(cached_input_price, (int, float))
-                    or not math.isfinite(cached_input_price) or not 0 <= cached_input_price <= input_price):
-                raise ValueError("Cached input tariff must be between zero and the uncached tariff")
-        amount = _charge(input_token_bound, output_token_limit, input_price, output_price)
+        if self.mode == "currency":
+            if units is not None:
+                raise ValueError("Currency reservations use token prices, not quota units")
+            input_price = _positive(input_price, "prompt token price")
+            output_price = _positive(output_price, "completion token price")
+            if cached_input_price is not None:
+                if (isinstance(cached_input_price, bool) or not isinstance(cached_input_price, (int, float))
+                        or not math.isfinite(cached_input_price) or not 0 <= cached_input_price <= input_price):
+                    raise ValueError("Cached input tariff must be between zero and the uncached tariff")
+            amount = _charge(input_token_bound, output_token_limit, input_price, output_price)
+        else:
+            if input_price != 0 or output_price != 0 or cached_input_price is not None:
+                raise ValueError("Free quota reservations must not supply fabricated token prices")
+            units = _units(units, f"{self.unit} quota", mode=self.mode)
+            amount = _nano(units)
+            input_price = output_price = 0.0
         call_id = uuid4().hex
         with self._connect() as db:
             db.execute("BEGIN IMMEDIATE")
             meta = db.execute("SELECT * FROM budget_meta WHERE singleton=1").fetchone()
             held = db.execute("SELECT COALESCE(SUM(held_nano),0) FROM budget_calls").fetchone()[0]
             if meta["halted"]:
-                raise BudgetExceeded("Budget ledger halted after an observed reservation overrun")
+                reason = meta["halted_reason"] or "observed reservation overrun"
+                raise BudgetExceeded(f"Budget ledger halted after {reason}")
             if held + amount > meta["limit_nano"]:
                 raise BudgetExceeded("Insufficient budget for the next bounded API request")
             db.execute("""INSERT INTO budget_calls
                 (id,model,input_bound,output_limit,input_price,output_price,reserved_nano,held_nano,state,cached_input_price)
                 VALUES (?,?,?,?,?,?,?,?,'pending',?)""",
                 (call_id, model, input_token_bound, output_token_limit, input_price, output_price, amount, amount, cached_input_price))
-        return Reservation(call_id, model, amount / NANOUNITS, input_token_bound, output_token_limit, self.currency)
+        return Reservation(call_id, model, amount / NANOUNITS, input_token_bound, output_token_limit,
+                           self.currency, self.mode, self.unit)
 
     def settle(self, call_id: str, usage: Mapping[str, Any] | None, *, response_id: str | None = None) -> dict:
         try:
@@ -233,9 +332,16 @@ class BudgetLedger:
                 raise ValueError("Unknown budget reservation")
             if row["state"] != "pending":
                 raise ValueError("Reservation is already terminal; settlement replay is not allowed")
-            actual = _charge(prompt, completion, row["input_price"], row["output_price"], cache_hit, row["cached_input_price"])
-            overrun = actual > row["reserved_nano"] or prompt > row["input_bound"] or completion > row["output_limit"]
-            state = "overrun" if overrun else "settled"
+            if self.mode == "currency":
+                actual = _charge(prompt, completion, row["input_price"], row["output_price"], cache_hit, row["cached_input_price"])
+                overrun = actual > row["reserved_nano"] or prompt > row["input_bound"] or completion > row["output_limit"]
+                state = "overrun" if overrun else "settled"
+            else:
+                # The request was admitted and completed: it consumes its quota
+                # units regardless of token counts. Token-bound overruns are
+                # recorded by the bounds columns but are not a spending overrun.
+                actual = row["reserved_nano"]
+                overrun, state = False, "settled"
             # Response IDs enable reconciliation with saved raw responses. Never
             # accept arbitrary provider payloads as ledger metadata.
             safe_response_id = (response_id if isinstance(response_id, str) and 0 < len(response_id) <= 256
@@ -244,12 +350,24 @@ class BudgetLedger:
                 prompt_cache_hit_tokens=?,prompt_cache_miss_tokens=?,cache_usage_reported=?,response_id=? WHERE id=?""",
                        (actual, actual, prompt, completion, state, cache_hit, cache_miss, int(cache_reported), safe_response_id, call_id))
             if overrun:
-                db.execute("UPDATE budget_meta SET halted=1 WHERE singleton=1")
-        return {"state": state, "actual": actual / NANOUNITS, "currency": self.currency,
-                f"actual_{self.currency.lower()}": actual / NANOUNITS,
-                "prompt_tokens": prompt, "completion_tokens": completion,
-                "prompt_cache_hit_tokens": cache_hit, "prompt_cache_miss_tokens": cache_miss,
-                "cache_usage_reported": cache_reported}
+                db.execute("UPDATE budget_meta SET halted=1,halted_reason='reservation_overrun' WHERE singleton=1")
+        result = {"state": state, "actual": actual / NANOUNITS, "currency": self.currency,
+                  "mode": self.mode, "unit": self.unit,
+                  "prompt_tokens": prompt, "completion_tokens": completion,
+                  "prompt_cache_hit_tokens": cache_hit, "prompt_cache_miss_tokens": cache_miss,
+                  "cache_usage_reported": cache_reported,
+                  "token_bound_exceeded": prompt > row["input_bound"] or completion > row["output_limit"]}
+        if self.mode == "currency":
+            result[f"actual_{self.currency.lower()}"] = actual / NANOUNITS
+        else:
+            result[f"actual_{self.unit}s"] = actual / NANOUNITS
+        return result
+
+    def halt(self, reason: str) -> None:
+        if reason not in HALT_REASONS:
+            raise ValueError("Halt reason must be a predefined non-sensitive code")
+        with self._connect() as db:
+            db.execute("UPDATE budget_meta SET halted=1,halted_reason=? WHERE singleton=1", (reason,))
 
     def mark_uncertain(self, call_id: str, reason: str = "request_failed") -> None:
         if reason not in ("request_failed", "missing_or_invalid_usage", "response_unreadable"):
@@ -266,26 +384,46 @@ class BudgetLedger:
         with self._connect() as db:
             meta = db.execute("SELECT * FROM budget_meta WHERE singleton=1").fetchone()
             rows = db.execute("SELECT state,COUNT(*) AS n,SUM(held_nano) AS held,SUM(actual_nano) AS actual FROM budget_calls GROUP BY state").fetchall()
+            tokens = db.execute(
+                "SELECT COALESCE(SUM(prompt_tokens),0) AS prompt, COALESCE(SUM(completion_tokens),0) AS completion "
+                "FROM budget_calls WHERE state IN ('settled','overrun')").fetchone()
         held = sum(r["held"] for r in rows)
         measured = sum(r["actual"] or 0 for r in rows) / NANOUNITS
         complete = not any(r["state"] in ("pending", "uncertain") for r in rows)
         amounts = {"limit": meta["limit_nano"] / NANOUNITS, "held": held / NANOUNITS,
                    "remaining": max(0, meta["limit_nano"] - held) / NANOUNITS,
                    "measured": measured, "actual_total": measured if complete else None}
-        return {**amounts, **{f"{key}_{self.currency.lower()}": value for key, value in amounts.items()},
-                "currency": self.currency,
-                "pricing_basis": self.pricing_basis,
-                "token_priced_total": measured if complete else None,
-                "invoice_total": None, "invoice_verified": False,
-                "cost_note": "Token usage valued at configured rates; not a provider invoice. Cache/time discounts and provider fees may differ.",
-                "cache_accounting": "New calls apply configured cached input prices only to validated provider cache counts. Historical settled records are unchanged; reservation basis remains worst-case uncached.",
+        token_stats = {"prompt_tokens": tokens["prompt"], "completion_tokens": tokens["completion"],
+                       "total_tokens": tokens["prompt"] + tokens["completion"]}
+        base = {"mode": meta["mode"], "unit": meta["unit"], "currency": self.currency,
+                "pricing_basis": self.pricing_basis, **token_stats,
                 "cost_complete": complete,
-                "halted": bool(meta["halted"]), "counts": {r["state"]: r["n"] for r in rows},
+                "halted": bool(meta["halted"]), "halted_reason": meta["halted_reason"] or None,
+                "counts": {r["state"]: r["n"] for r in rows},
                 "scope": "All chat calls routed through the official _get_client; excludes provider-side fees"}
+        if self.mode == "currency":
+            aliases = {f"{key}_{self.currency.lower()}": value for key, value in amounts.items()}
+            return {**amounts, **aliases, **base,
+                    "token_priced_total": measured if complete else None,
+                    "invoice_total": None, "invoice_verified": False,
+                    "cost_note": "Token usage valued at configured rates; not a provider invoice. Cache/time discounts and provider fees may differ.",
+                    "cache_accounting": "New calls apply configured cached input prices only to validated provider cache counts. Historical settled records are unchanged; reservation basis remains worst-case uncached."}
+        unit_key = "requests" if self.unit == "request" else "credits"
+        aliases = {f"{key}_{unit_key}": value for key, value in amounts.items()}
+        return {**amounts, **aliases, **base,
+                "token_priced_total": None, "invoice_total": None, "invoice_verified": False,
+                "cost_note": "Free provider quota accounting. Token usage is recorded; no cash price is invented.",
+                "cache_accounting": "Free mode records reported cache counts when present; no token price is applied.",
+                "quota_note": "Provider-side daily/monthly quota remains authoritative; this ledger only prevents exceeding the declared local limit."}
 
 
-def request_bounds(request: Mapping[str, Any], model_config: Mapping[str, Any], *, currency: str = "USD") -> tuple[int, int, float, float]:
+def request_bounds(request: Mapping[str, Any], model_config: Mapping[str, Any], *,
+                   currency: str = "USD", mode: str = "currency") -> tuple[int, int, float, float]:
     """Validate a supported text-only, one-completion request and its tariff.
+
+    In ``requests``/``credits`` mode no token price is required or invented:
+    the first two bounds are still used for usage monitoring, while the two
+    price fields are explicit zeros that the free-mode reservation ignores.
 
     UTF-8 bytes upper-bound ordinary text BPE token counts; extra protocol/tool
     overhead is conservatively reserved. This assumption is monitored against
@@ -306,7 +444,14 @@ def request_bounds(request: Mapping[str, Any], model_config: Mapping[str, Any], 
     if not caps:
         raise ValueError("An explicit max_tokens or max_completion_tokens cap is required")
     output_limit = max(_tokens(cap, "output token cap", positive=True) for cap in caps)
-    input_price, output_price = _tariff(model_config, currency)
+    if mode in ("requests", "credits"):
+        if model_config.get("billing") != "free":
+            raise ValueError("Free quota mode requires a model config with billing: free")
+        input_price = output_price = 0.0
+    elif mode == "currency":
+        input_price, output_price = _tariff(model_config, currency)
+    else:
+        raise ValueError("Unknown budget mode")
     payload = {key: request[key] for key in ("messages", "tools", "tool_choice", "response_format") if key in request}
     encoded = json.dumps(payload, ensure_ascii=False, allow_nan=False, separators=(",", ":")).encode("utf-8")
     tool_count = len(request.get("tools") or [])
@@ -322,13 +467,21 @@ class _Completions:
         model = request.get("model")
         if not isinstance(model, str) or model not in self.model_configs:
             raise ValueError("Budgeted model must have explicit model configuration")
-        bounds = request_bounds(request, self.model_configs[model], currency=self.ledger.currency)
-        cached_price = _cached_price(self.model_configs[model], self.ledger.currency)
-        reservation = self.ledger.reserve(model, *bounds, cached_input_price=cached_price)
+        config = self.model_configs[model]
+        if self.ledger.mode == "currency":
+            bounds = request_bounds(request, config, currency=self.ledger.currency)
+            cached_price = _cached_price(config, self.ledger.currency)
+            reservation = self.ledger.reserve(model, *bounds, cached_input_price=cached_price)
+        else:
+            bounds = request_bounds(request, config, mode=self.ledger.mode)
+            reservation = self.ledger.reserve(model, *bounds,
+                                              units=_free_units(config, self.ledger.unit))
         try:
             response = self.original.create(**request)
-        except Exception:
+        except Exception as exc:
             self.ledger.mark_uncertain(reservation.id)
+            if _provider_quota_error(exc):
+                self.ledger.halt("provider_quota_exhausted")
             raise
         try:
             body = response.model_dump()
@@ -343,16 +496,21 @@ class _Completions:
 
 def install_budget_guard(path: str | Path, limit_usd: float | None = None, *,
                          limit: float | None = None, currency: str = "USD",
-                         pricing_basis: str = "configured_token_rates") -> BudgetLedger:
+                         pricing_basis: str = "configured_token_rates",
+                         mode: str = "currency", unit: str | None = None) -> BudgetLedger:
     """Patch the official client factory; install before launching benchmark runs.
 
     Returns the ledger for reporting. Reinstallation targets the same original
     factory rather than nesting wrappers. Client SDK retries are forced to zero.
     Configure VITA_MODEL_CONFIG_PATH before calling: upstream loads model config
     on import. This function performs no network request.
+
+    For a genuinely free endpoint use ``mode='requests'`` or ``mode='credits'``
+    and a positive request/credit limit; do not pass zero token prices.
     """
     from vita.utils import llm_utils
-    ledger = BudgetLedger(path, limit_usd, limit=limit, currency=currency, pricing_basis=pricing_basis)
+    ledger = BudgetLedger(path, limit_usd, limit=limit, currency=currency,
+                          pricing_basis=pricing_basis, mode=mode, unit=unit)
     original = getattr(llm_utils._get_client, "_budget_original", llm_utils._get_client)
 
     def guarded_factory(base_url, api_key, max_retries):
@@ -370,6 +528,10 @@ def install_budget_guard(path: str | Path, limit_usd: float | None = None, *,
             raise UsageUnavailable("Valid usage is required for cost reporting")
         prompt = _tokens(usage.get("prompt_tokens"), "prompt_tokens")
         completion = _tokens(usage.get("completion_tokens"), "completion_tokens")
+        if ledger.mode != "currency":
+            # A free tier's cash cost is zero; quota consumption is tracked by
+            # the ledger. This is not a zero-price paid tariff.
+            return 0.0
         cache_hit, _, _ = _cache_counts(usage, prompt)
         ip, op = _tariff(llm_utils.models.get(model, {}), ledger.currency)
         cached_price = _cached_price(llm_utils.models.get(model, {}), ledger.currency)
@@ -385,4 +547,6 @@ def install_budget_guard(path: str | Path, limit_usd: float | None = None, *,
     llm_utils.get_response_cost = response_cost
     llm_utils.get_response_usage = response_usage
     llm_utils.BUDGET_CURRENCY = ledger.currency
+    llm_utils.BUDGET_MODE = ledger.mode
+    llm_utils.BUDGET_UNIT = ledger.unit
     return ledger

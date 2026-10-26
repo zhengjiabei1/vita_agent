@@ -120,6 +120,23 @@ def test_valid_frozen_bank_used_read_only_and_full_uses_test(inputs, tmp_path):
     assert plan["runs"][0]["environment"]["VITA_SKILL_BANK"] == ""
 
 
+def test_v2_reflected_bank_is_accepted_by_the_runner(inputs, tmp_path):
+    from vita_agent.skill_reflection import ReflectedCandidate, _lesson_id, freeze_reflected_bank
+    from vita_agent.skills import Provenance, Skill
+    data = dataset_manifest(inputs["dataset"])
+    lesson = ("Check the most recent preference evidence before choosing a candidate "
+              "and verify that older conflicting evidence is superseded.")
+    skill = Skill(_lesson_id("task", "delivery", "action", lesson), "task", "delivery", "action",
+                  lesson, (), (Provenance(data["tasks"]["train"][0], "trace-v2"),))
+    candidate = ReflectedCandidate(skill, "a" * 64, "b" * 64, ((1, "c" * 64),))
+    path = tmp_path / "v2.json"
+    freeze_reflected_bank(path, [candidate], excluded_task_ids=data["tasks"]["test"])
+    plan = build_plan(**dict(inputs, variants=["baseline", "skills"], skill_bank=path))
+    assert plan["skill_bank"]["payload_digest"] == json.loads(path.read_text())["sha256"]
+    assert plan["runs"][1]["environment"]["VITA_SKILL_BANK"] == str(path.resolve())
+    assert plan["model"]["billing"] == "paid"
+
+
 @pytest.mark.parametrize("value", [None, 0, -1, True, float("nan"), "1"])
 def test_invalid_budget_never_executes(value):
     with pytest.raises(ValueError, match="budget"):
@@ -178,6 +195,65 @@ def test_cny_tariff_and_currency_mismatch(inputs, monkeypatch):
     monkeypatch.setenv("VITA_TEST_KEY", "test-only")
     with pytest.raises(ValueError, match="currency"):
         execute_plan(inputs["output"] / "plan.json", budget_usd=20)
+
+
+def _write_free_config(path):
+    path.write_text("default:\n  base_url: https://opencode.invalid/v1\n  api_key: ${VITA_TEST_KEY}\n"
+                    "  max_tokens: 128\n  billing: free\n  free_quota:\n    unit: request\n"
+                    "models:\n  - name: test-model\n")
+
+
+def test_free_model_preflight_uses_quota_not_zero_prices(inputs):
+    _write_free_config(inputs["model_config"])
+    result = model_preflight(inputs["model_config"], "test-model",
+                             environment={"VITA_TEST_KEY": "private-test-value"})
+    assert result["billing"] == "free" and result["currency"] is None
+    assert result["free_quota"] == {"unit": "request", "credit_per_request": None, "note": None}
+    assert result["pricing_basis"] == "free_provider_quota"
+    assert "private-test-value" not in json.dumps(result)
+
+
+def test_free_model_rejects_token_tariff_and_bad_credit_unit(inputs):
+    inputs["model_config"].write_text(
+        "default:\n  base_url: https://opencode.invalid/v1\n  api_key: ${VITA_TEST_KEY}\n"
+        "  max_tokens: 128\n  billing: free\n  cost_1m_token_dollar:\n"
+        "    prompt_price: 0\n    completion_price: 0\n"
+        "  free_quota:\n    unit: request\nmodels:\n  - name: test-model\n")
+    with pytest.raises(ValueError, match="must not declare a token tariff"):
+        model_preflight(inputs["model_config"], "test-model")
+    inputs["model_config"].write_text(
+        "default:\n  base_url: https://opencode.invalid/v1\n  api_key: ${VITA_TEST_KEY}\n"
+        "  max_tokens: 128\n  billing: free\n  free_quota:\n    unit: credit\n"
+        "models:\n  - name: test-model\n")
+    with pytest.raises(ValueError, match="credit_per_request"):
+        model_preflight(inputs["model_config"], "test-model")
+
+
+def test_free_execution_requires_request_quota_and_shares_ledger(inputs, monkeypatch):
+    _write_free_config(inputs["model_config"])
+    build_plan(**dict(inputs, variants=["baseline"]))
+    monkeypatch.setenv("VITA_TEST_KEY", "test-only-value")
+    with pytest.raises(ValueError, match="max-requests"):
+        execute_plan(inputs["output"] / "plan.json", budget_usd=1)
+    class Failure:
+        returncode = 9
+    def failed_worker(command, **kwargs):
+        return Failure()
+    monkeypatch.setattr("vita_agent.experiments.subprocess.run", failed_worker)
+    with pytest.raises(RuntimeError, match="Official evaluation failed"):
+        execute_plan(inputs["output"] / "plan.json", max_requests=12,
+                     budget_ledger=inputs["output"] / "shared.sqlite3")
+    execution = json.loads((inputs["output"] / "execution.json").read_text())
+    assert execution["mode"] == "requests" and execution["unit"] == "request"
+    assert execution["budget"] == 12 and execution["currency"] == "FREE"
+    assert execution["pricing_basis"] == "free_provider_quota"
+
+
+def test_paid_model_rejects_request_quota(inputs, monkeypatch):
+    build_plan(**dict(inputs, variants=["baseline"]))
+    monkeypatch.setenv("VITA_TEST_KEY", "test-only-value")
+    with pytest.raises(ValueError, match="budget"):
+        execute_plan(inputs["output"] / "plan.json", max_requests=5)
 
 
 def test_redaction_preserves_sampling_but_removes_credentials():

@@ -1,0 +1,130 @@
+{
+  "schema_version": 1,
+  "source": "reports/2026-10-26-train-prefix2/{baseline,harness}.json",
+  "scope": "One training user, first two subtasks, one trial per arm. NOT a test-set score.",
+  "dataset_sha256": "3a05f7e2742f204ae28b71db95b14e2daa94c9ff354f510a7d9c707564c7466e",
+  "task_hash": "f4cc6c8e8ad6",
+  "subtask_domains": [
+    "delivery",
+    "ota"
+  ],
+  "arms": [
+    {
+      "arm_file": "baseline.json",
+      "task_hash": "f4cc6c8e8ad6",
+      "trial": 0,
+      "reward": 0.0,
+      "subtask_rewards": {
+        "subtask_0_reward": 0.0,
+        "subtask_1_reward": 0.0
+      },
+      "termination_reason": "user_stop",
+      "message_count": 35,
+      "tool_call_count": 9,
+      "tool_errors": 0,
+      "guard_or_fallback_blocks": 0,
+      "tool_sequence": [
+        "delivery_store_search_recommand",
+        "get_delivery_store_info",
+        "create_delivery_order",
+        "hotel_search_recommand",
+        "get_ota_hotel_info",
+        "create_hotel_order",
+        "create_hotel_order",
+        "pay_hotel_order",
+        "pay_hotel_order"
+      ],
+      "usage_from_messages": {
+        "prompt_tokens": 514170,
+        "completion_tokens": 1975,
+        "total_tokens": 516145
+      },
+      "orders_in_final_state": {
+        "delivery": {
+          "total_price": 36.0,
+          "status": "unpaid",
+          "product_tags": [
+            "牛肉",
+            "盖饭",
+            "辛辣",
+            "高GI"
+          ]
+        },
+        "hotel": {
+          "status": "paid",
+          "hotel_id": "S17790989581294889_H00010",
+          "room_dates": [
+            "2026-04-03"
+          ],
+          "brand_is_sheraton": false,
+          "brand_label": "other_brand"
+        }
+      },
+      "observed_rubric_risks": [
+        "delivery_high_gi_or_processed",
+        "hotel_brand_not_sheraton"
+      ]
+    },
+    {
+      "arm_file": "harness.json",
+      "task_hash": "f4cc6c8e8ad6",
+      "trial": 0,
+      "reward": 0.0,
+      "subtask_rewards": {
+        "subtask_0_reward": 0.0,
+        "subtask_1_reward": 0.0
+      },
+      "termination_reason": "user_stop",
+      "message_count": 37,
+      "tool_call_count": 7,
+      "tool_errors": 0,
+      "guard_or_fallback_blocks": 4,
+      "tool_sequence": [
+        "delivery_store_search_recommand",
+        "get_delivery_store_info",
+        "get_delivery_product_info",
+        "create_delivery_order",
+        "hotel_search_recommand",
+        "get_ota_hotel_info",
+        "create_hotel_order"
+      ],
+      "usage_from_messages": {
+        "prompt_tokens": 813034,
+        "completion_tokens": 3999,
+        "total_tokens": 817033
+      },
+      "orders_in_final_state": {
+        "delivery": null,
+        "hotel": {
+          "status": "unpaid",
+          "hotel_id": "S17790989581294889_H00010",
+          "room_dates": [
+            "2026-04-03"
+          ],
+          "brand_is_sheraton": false,
+          "brand_label": "other_brand"
+        }
+      },
+      "observed_rubric_risks": [
+        "delivery_order_missing",
+        "hotel_unpaid",
+        "hotel_brand_not_sheraton"
+      ]
+    }
+  ],
+  "conclusion": {
+    "score_is_evaluator_bug": false,
+    "evidence": [
+      "Both arms ended with user_stop, not a crash or missing evaluation.",
+      "Baseline created both orders but selected a high-GI delivery product and a non-Sheraton hotel brand.",
+      "Harness blocked the delivery proposal repeatedly; its final state contains no delivery order, and its hotel order was unpaid.",
+      "The observed choices contradict the training user's explicit historical brand preference and the delivery rubric's health constraints."
+    ],
+    "interpretation": "The 0.0 scores are consistent with preference/constraint adherence failures and guard blocking, not evidence of an evaluator defect or a measured module benefit.",
+    "not_established": [
+      "No causal effect of guards, memory or skills.",
+      "No test-set performance.",
+      "No claim that more samples alone would change the result."
+    ]
+  }
+}

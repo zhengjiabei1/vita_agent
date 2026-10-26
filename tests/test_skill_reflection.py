@@ -4,6 +4,7 @@ import json
 import pytest
 
 from vita_agent.skill_reflection import reflect_training_results, freeze_reflected_bank, load_reflected_bank
+from vita_agent.skills import FrozenSkillBank
 
 
 @pytest.fixture
@@ -43,6 +44,10 @@ def test_real_trace_reflection_is_only_a_cited_hypothesis(inputs, tmp_path):
     digest = freeze_reflected_bank(path, report.candidates, excluded_task_ids=["test-one"])
     bank = load_reflected_bank(path)
     assert bank.digest == digest
+    # The unified loader must dispatch v2 snapshots to the same read-only bank.
+    unified = FrozenSkillBank.load(path)
+    assert unified.digest == digest
+    assert [s.id for s in unified.list_skills()] == [s.id for s in bank.list_skills()]
     assert len(bank.retrieve("preference", "delivery")) == 1
     assert "use the older preference" not in path.read_text()
     with pytest.raises(RuntimeError):

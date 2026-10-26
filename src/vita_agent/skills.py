@@ -350,6 +350,12 @@ class FrozenSkillBank:
         if not isinstance(document, dict) or set(document) != {"payload", "sha256"}:
             raise ValueError("Invalid frozen bank envelope")
         payload = document["payload"]
+        # Version-two LLM-reflection snapshots share the same read-only
+        # retrieval interface. Lazy import avoids a module cycle; integrity and
+        # provenance validation stay in skill_reflection.
+        if isinstance(payload, dict) and payload.get("format") == "vita-reflected-skill-bank":
+            from .skill_reflection import _parse_document
+            return _parse_document(document)
         if not isinstance(document["sha256"], str) or hashlib.sha256(_canonical(payload)).hexdigest() != document["sha256"]:
             raise ValueError("Frozen bank SHA-256 integrity check failed")
         keys = {"format", "version", "source_split", "utility_formula", "skills"}

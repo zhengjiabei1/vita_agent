@@ -233,6 +233,91 @@ def test_cache_schema_migration_does_not_reprice_historical_calls(tmp_path):
         assert db.execute("SELECT cached_input_price FROM budget_calls WHERE id=?", (first.id,)).fetchone() == (None,)
 
 
+def test_free_request_ledger_counts_requests_not_invented_prices(tmp_path):
+    ledger = BudgetLedger(tmp_path / "free.db", limit=2, currency="FREE",
+                          pricing_basis="free_provider_quota", mode="requests")
+    first = ledger.reserve("free-model", 1000, 100, units=1)
+    second = ledger.reserve("free-model", 1000, 100, units=1)
+    assert first.reserved_units == 1 and second.reserved_units == 1
+    ledger.settle(first.id, {"prompt_tokens": 120, "completion_tokens": 12})
+    ledger.settle(second.id, {"prompt_tokens": 80, "completion_tokens": 8})
+    summary = ledger.summary()
+    assert summary["mode"] == "requests" and summary["unit"] == "request"
+    assert summary["limit"] == 2 and summary["held"] == 2 and summary["remaining"] == 0
+    assert summary["held_requests"] == 2 and summary["prompt_tokens"] == 200
+    assert summary["total_tokens"] == 220 and summary["token_priced_total"] is None
+    assert "held_usd" not in summary
+    with pytest.raises(BudgetExceeded):
+        ledger.reserve("free-model", 1000, 100, units=1)
+
+
+def test_free_ledger_rejects_fabricated_prices_and_fractional_requests(tmp_path):
+    ledger = BudgetLedger(tmp_path / "free.db", limit=2, currency="FREE",
+                          pricing_basis="free_provider_quota", mode="requests")
+    with pytest.raises(ValueError, match="fabricated"):
+        ledger.reserve("free-model", 1000, 100, 0.01, 0.02, units=1)
+    with pytest.raises(ValueError, match="whole"):
+        ledger.reserve("free-model", 1000, 100, units=0.5)
+    config = {"billing": "free", "free_quota": {"unit": "request"}}
+    request = {"model": "free-model", "messages": [{"role": "user", "content": "hi"}], "max_tokens": 10}
+    assert request_bounds(request, config, mode="requests")[2:] == (0.0, 0.0)
+    with pytest.raises(ValueError, match="billing: free"):
+        request_bounds(request, CONFIG, mode="requests")
+
+
+def test_provider_429_halts_shared_free_ledger(tmp_path):
+    path = tmp_path / "free.db"
+    ledger = BudgetLedger(path, limit=5, currency="FREE",
+                          pricing_basis="free_provider_quota", mode="requests")
+    class QuotaError(Exception):
+        status_code = 429
+    wrapped = _Completions(SimpleNamespace(create=lambda **kw: (_ for _ in ()).throw(
+        QuotaError("Free usage limit reached"))), ledger,
+        {"free-model": {"billing": "free", "free_quota": {"unit": "request"}}})
+    with pytest.raises(QuotaError):
+        wrapped.create(model="free-model", messages=[{"role": "user", "content": "hi"}], max_tokens=10)
+    summary = ledger.summary()
+    assert summary["halted"] and summary["halted_reason"] == "provider_quota_exhausted"
+    assert summary["counts"] == {"uncertain": 1}
+    with pytest.raises(BudgetExceeded, match="provider_quota_exhausted"):
+        BudgetLedger(path, limit=5, currency="FREE", pricing_basis="free_provider_quota",
+                     mode="requests").reserve("free-model", 1000, 100, units=1)
+
+
+def test_free_credit_ledger_uses_configured_credit_cost(tmp_path):
+    ledger = BudgetLedger(tmp_path / "credits.db", limit=3, currency="FREE",
+                          pricing_basis="free_provider_quota", mode="credits")
+    config = {"billing": "free", "free_quota": {"unit": "credit", "credit_per_request": 0.5}}
+    raw = SimpleNamespace(create=lambda **kw: SimpleNamespace(model_dump=lambda:
+        {"usage": {"prompt_tokens": 10, "completion_tokens": 2}}))
+    wrapped = _Completions(raw, ledger, {"free-model": config})
+    for _ in range(6):
+        wrapped.create(model="free-model", messages=[{"role": "user", "content": "hi"}], max_tokens=10)
+    summary = ledger.summary()
+    assert summary["held_credits"] == 3 and summary["remaining"] == 0
+    with pytest.raises(BudgetExceeded):
+        wrapped.create(model="free-model", messages=[{"role": "user", "content": "hi"}], max_tokens=10)
+
+
+def test_installer_free_mode_reports_zero_cash_without_fake_tariff(monkeypatch, tmp_path):
+    from vita_agent.budget import install_budget_guard
+    free = {"billing": "free", "free_quota": {"unit": "request"}}
+    fake = SimpleNamespace(_get_client=lambda **kw: None, models={"free-model": free})
+    monkeypatch.setitem(sys.modules, "vita.utils", SimpleNamespace(llm_utils=fake))
+    ledger = install_budget_guard(tmp_path / "free.db", limit=4, currency="FREE",
+                                  pricing_basis="free_provider_quota", mode="requests")
+    assert fake.BUDGET_MODE == "requests" and fake.BUDGET_UNIT == "request"
+    assert fake.get_response_cost({"prompt_tokens": 100, "completion_tokens": 20}, "free-model") == 0.0
+    assert ledger.summary()["held_requests"] == 0
+
+
+def test_ledger_mode_is_immutable_across_phases(tmp_path):
+    path = tmp_path / "shared.db"
+    BudgetLedger(path, limit=3, currency="FREE", pricing_basis="free_provider_quota", mode="requests")
+    with pytest.raises(ValueError, match="immutable"):
+        BudgetLedger(path, limit=3, currency="FREE", pricing_basis="free_provider_quota", mode="credits")
+
+
 def test_official_usage_retains_cache_counts_and_cost_uses_them(monkeypatch, tmp_path):
     from vita_agent.budget import install_budget_guard
     fake = SimpleNamespace(_get_client=lambda **kw: None,

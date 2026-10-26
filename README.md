@@ -46,10 +46,10 @@ flowchart LR
 | 模块 | 实现 | 边界 |
 |---|---|---|
 | `harness.py` / `guards.py` | 校验预算、过敏原、日期、数量、库存、容量和必填字段；限制重生成；完整计入草稿成本；SQLite 幂等日志 | 事实由可信 resolver 提供；模型草稿不能自报价格作为证据；真实服务仍需原子校验和幂等支持 |
-| `memory.py` / `semantic_memory.py` | SQLite slot memory；引用和时间证据；supersede 覆盖链；可选 LLM 语义抽取和原始用户证据检索 | 未经确定性核实的语义硬约束降为候选；软偏好和原文回退采用词项检索，当前不是 embedding RAG |
-| `skills.py` / `skill_reflection.py` | 规则模板提炼、效用淘汰和 SHA-256 冻结；另有引用训练轨迹证据的 LLM 反思模块 | 反思 v2 快照尚未接入统一加载器及实验流程；没有真实技能收益数据；不从测试轨迹学习 |
+| `memory.py` / `semantic_memory.py` | SQLite slot memory；引用和时间证据；supersede 覆盖链；可选 LLM 语义抽取和原始用户证据检索；明确正向的酒店品牌软偏好 | 未经确定性核实的语义硬约束降为候选；软偏好和原文回退采用词项检索，当前不是 embedding RAG；品牌规则覆盖很窄 |
+| `skills.py` / `skill_reflection.py` | 规则模板提炼、效用淘汰和 SHA-256 冻结；引用训练轨迹证据的 LLM 反思模块；v2 快照已接入统一加载器 | 尚未生成真实 v2 技能库或测得技能收益；没有 grounded 候选时不写快照；不从测试轨迹学习 |
 | `vitabench.py` / `official_facts.py` | 官方 `BaseMemory` 插件、受约束 Agent 子类；覆盖 30 个官方写工具的观察事实映射 | 必需事实缺失时拒绝；仅加载记忆插件不会启用执行检查；覆盖工具不代表所有业务规则完备 |
-| `experiments.py` / `budget.py` | 固定用户划分、实验计划哈希、五组消融入口、共享预算和请求用量账本 | 目前按货币单价预留预算；免费 API 的请求数或积分额度限制尚待接入 |
+| `experiments.py` / `budget.py` | 固定用户划分、实验计划哈希、五组消融入口、共享额度账本；支持货币、请求数和积分三种模式 | 免费模式不伪造单价；供应商 429/额度耗尽会 halt 共享 ledger；本地计数不能替代供应商额度 |
 | `evaluation.py` | 官方结果配对比较、偏好更新子集、按用户 bootstrap、成本变化 | 缺失 trial/分数拒绝比较；未知成本保留 `null` |
 
 ## 编程接口
@@ -94,6 +94,8 @@ python -m vita_agent distill examples/failed_traces.jsonl \
 
 `SkillBank.record_outcome(skill_id, success, cost, split="dev")` 记录开发集使用结果。效用定义为 `(successes+1)/(trials+2) - 0.5 - mean_cost`，达到最低样本数且低于阈值时淘汰。成本的尺度影响阈值，须在开发集固定。冻结后禁止提炼、更新效用或淘汰；快照不可覆盖，加载校验内容哈希。哈希用于完整性检查，不能证明数据来源或实验划分正确。
 
+LLM 反思生成的是带原文引用校验的 v2 假设快照。`FrozenSkillBank.load()` 同时支持 v1 和 v2，实验计划的 `--skill-bank`、校验和 worker 可直接加载。`scripts/reflect_skills.py` 使用同一额度账本，额度耗尽时不冻结部分结果；真实反思与技能收益尚未完成。
+
 ## 官方基准与实验
 
 见 [真实实验入口](docs/experiments.md)、[VitaBench 接入说明](docs/vitabench.md) 和 [评测与消融协议](docs/evaluation.md)。正式调用使用 `scripts/run_experiments.py`，以统一启用预算、脱敏、版本校验及各组一致的上游兼容补丁。官方数据、模型配置与 LLM 推理费用均独立于本地演示。
@@ -105,6 +107,16 @@ python -m vita_agent compare baseline.json candidate.json \
 
 建议以用户划分 train/dev/test，固定模型、采样、最大步骤、trial 数、数据版本，比较 baseline、仅 harness、仅 memory、仅 frozen skills 和全模块。在线测试用户的私有偏好可按基准协议更新；跨用户技能库在测试前冻结。
 
-截至 2026-10-26，已完成一次真实 DeepSeek 训练集短前缀试验：1 个训练用户、前 2 个子任务、1 次 trial，baseline 和 harness 两组平均分均为 **0.0**。这不是保留测试集成绩，也不能说明总体有效或无效。官方 `agent_cost` 聚合值缺失，成本增长率保持 `null`。尚未完成 memory、skills、full 组的真实消融、开发集筛选或测试集评估；付费调用已暂停，等待新平台接入。
+免费模型使用请求数或积分额度，而不是 0 单价：
 
-当前成果适合描述为“实现并测试了上述机制，完成官方接口接入和小规模真实训练试跑”。简历中的提升数字仍无实验支持。验证记录见 [verification.md](docs/verification.md)，换平台继续开发见 [HANDOFF.md](HANDOFF.md)。
+```bash
+OPENCODE_API_KEY="<environment only>" \
+python scripts/run_experiments.py execute artifacts/free-train-prefix2-v2/plan.json \
+  --max-requests 3 --budget-ledger artifacts/free-shared.sqlite3
+```
+
+截至 2026-10-27，已完成一次真实 DeepSeek 训练集短前缀试验：1 个训练用户、前 2 个子任务、1 次 trial，baseline 和 harness 两组平均分均为 **0.0**。零分诊断显示 baseline 选择了高 GI 外卖和错误酒店品牌，harness 多次阻塞且最终无外卖订单；没有评分器缺陷证据。这不是保留测试集成绩，也不能说明总体有效或无效。官方 `agent_cost` 聚合值缺失，成本增长率保持 `null`。
+
+OpenCode 免费模型 `deepseek-v4.1-flash-free` 的请求数/积分模式、计划校验和 429 halt 已实现；实际预检返回 HTTP 429 `FreeUsageLimitError`，因此没有新模型 baseline 或正式五组结果，真实调用已停止。付费 DeepSeek 调用保持暂停。
+
+当前成果适合描述为“实现并测试了上述机制，完成官方接口接入、小规模真实训练试跑和零分诊断”。简历中的提升数字仍无实验支持。验证记录见 [verification.md](docs/verification.md)，零分诊断见 [reports/2026-10-27-zero-score-diagnosis](reports/2026-10-27-zero-score-diagnosis/)，额度阻塞见 [reports/2026-10-27-provider-quota](reports/2026-10-27-provider-quota/)，换平台继续开发见 [HANDOFF.md](HANDOFF.md)。

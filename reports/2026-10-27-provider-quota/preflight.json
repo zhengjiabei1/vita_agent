@@ -1,0 +1,60 @@
+{
+  "schema_version": 1,
+  "created_at": "2026-10-26T19:16:33.353827+00:00",
+  "model": "deepseek-v4.1-flash-free",
+  "endpoint_host": "opencode.ai",
+  "billing": "free",
+  "quota_mode": "requests",
+  "quota_limit": 3,
+  "output_limits": {
+    "max_tokens": 4096
+  },
+  "tests": [
+    {
+      "name": "tool_call",
+      "ok": false,
+      "latency_s": 0.644,
+      "error_type": "RateLimitError",
+      "status_code": 429,
+      "error_message": "Error code: 429 - {'type': 'error', 'error': {'type': 'FreeUsageLimitError', 'message': 'Free usage limit reached. Free models work in OpenCode (https://opencode.ai); subscribe to OpenCode Go to keep going: https://opencode.ai/go'}}"
+    }
+  ],
+  "status": "stopped_provider_quota_exhausted",
+  "error": {
+    "error_type": "RateLimitError",
+    "status_code": 429,
+    "error_message": "Error code: 429 - {'type': 'error', 'error': {'type': 'FreeUsageLimitError', 'message': 'Free usage limit reached. Free models work in OpenCode (https://opencode.ai); subscribe to OpenCode Go to keep going: https://opencode.ai/go'}}"
+  },
+  "ledger": {
+    "limit": 3.0,
+    "held": 1.0,
+    "remaining": 2.0,
+    "measured": 0.0,
+    "actual_total": null,
+    "limit_requests": 3.0,
+    "held_requests": 1.0,
+    "remaining_requests": 2.0,
+    "measured_requests": 0.0,
+    "actual_total_requests": null,
+    "mode": "requests",
+    "unit": "request",
+    "currency": "FREE",
+    "pricing_basis": "free_provider_quota",
+    "prompt_tokens": 0,
+    "completion_tokens": 0,
+    "total_tokens": 0,
+    "cost_complete": false,
+    "halted": true,
+    "halted_reason": "provider_quota_exhausted",
+    "counts": {
+      "uncertain": 1
+    },
+    "scope": "All chat calls routed through the official _get_client; excludes provider-side fees",
+    "token_priced_total": null,
+    "invoice_total": null,
+    "invoice_verified": false,
+    "cost_note": "Free provider quota accounting. Token usage is recorded; no cash price is invented.",
+    "cache_accounting": "Free mode records reported cache counts when present; no token price is applied.",
+    "quota_note": "Provider-side daily/monthly quota remains authoritative; this ledger only prevents exceeding the declared local limit."
+  }
+}

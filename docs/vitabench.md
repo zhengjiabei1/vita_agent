@@ -57,9 +57,9 @@ vita run --domain personalization \
 
 每次官方任务 / trial 默认新建独立的内存 SQLite 数据库。即使用户 ID 相同，不同实例也不共享状态；缺失用户 ID 时生成实例 ID。需要落盘时显式传入 `path`，并为不同实验 / trial 使用独立路径。
 
-偏好抽取支持 `VITA_MEMORY_EXTRACTION=rules|llm`。直接加载插件默认使用保守规则，实验 runner 的计划默认使用 `llm`，并将选择写入计划。规则覆盖明确的总预算、食物过敏、已知菜系偏好；语义抽取要求原文引用和 schema 合法，无法由确定性规则核实的硬约束降为候选，不能仅凭模型断言执行硬拦截。原始用户证据同时保存在独立历史库，按词项检索回退；全部被覆盖的旧证据不会重新注入。硬约束完整注入，软偏好做分层词法检索。没有使用官方 oracle 记忆，也不从订单行为自动推断硬约束。
+偏好抽取支持 `VITA_MEMORY_EXTRACTION=rules|llm`。直接加载插件默认使用保守规则，实验 runner 的计划默认使用 `llm`，并将选择写入计划。规则覆盖明确的总预算、食物过敏、已知菜系偏好，以及明确正向的酒店品牌偏好（`hotel_brand`，软偏好）；语义抽取要求原文引用和 schema 合法，无法由确定性规则核实的硬约束降为候选，不能仅凭模型断言执行硬拦截。原始用户证据同时保存在独立历史库，按词项检索回退；全部被覆盖的旧证据不会重新注入。硬约束完整注入，软偏好做分层词法检索。没有使用官方 oracle 记忆，也不从订单行为自动推断硬约束。
 
-训练集审计解析了 10,004 条交互记录，无解析错误；27,762 条去重用户原话中，规则抽取仅命中 1 条。这是抽取覆盖统计，不是 gold 偏好召回率。带证据的语义抽取已实现，但还没有真实 memory 消融成绩。
+训练集审计解析了 10,004 条交互记录，无解析错误；27,762 条去重用户原话中，加入品牌规则后规则抽取命中 18 条（17 条 `hotel_brand`、1 条 `total_price`），此前仅 1 条。这是抽取覆盖统计，不是 gold 偏好召回率，也不是效果提升。带证据的语义抽取已实现，但还没有真实 memory 消融成绩。
 
 ## 启用 draft–check–regenerate 和冻结技能
 
@@ -79,7 +79,9 @@ python scripts/run_experiments.py check artifacts/smoke-v1/plan.json
 
 `make_guarded_agent_class()` 返回真正继承官方 `PersonalizationAgent` 的类。每次生成的工具调用先检查，再返回给官方 orchestrator 执行。失败草案不执行，也不加入已执行的对话历史；校验反馈交给模型重生成，默认最多重生成两次。超限后返回未执行说明。所有生成尝试的 token 和 cost 累加至最终消息；任一尝试缺少 cost / usage 时保留 `None`，不将未知成本伪装为零。
 
-可设置 `VITA_SKILL_BANK=/absolute/path/frozen-skills.json` 加载已冻结的 v1 技能；实验 runner 用 `--skill-bank` 指定。只向 prompt 注入经过 schema 和 SHA-256 校验的 `lesson`，不注入来源用户 / task / trace 标识。评测进程只有只读 `FrozenSkillBank`，不蒸馏评测轨迹、不更新效用。新增 `skill_reflection.py` 支持基于训练轨迹引用生成候选技能与 v2 快照，但 **v2 尚未接入 `FrozenSkillBank.load` 和实验流程**，也未执行真实 LLM 反思或测得技能收益。
+可设置 `VITA_SKILL_BANK=/absolute/path/frozen-skills.json` 加载已冻结技能；实验 runner 用 `--skill-bank` 指定。只向 prompt 注入经过 schema 和 SHA-256 校验的 `lesson`，不注入来源用户 / task / trace 标识。评测进程只有只读 `FrozenSkillBank`，不蒸馏评测轨迹、不更新效用。
+
+`skill_reflection.py` 支持基于训练轨迹引用生成候选技能与 v2 快照。**v2 已接入统一 `FrozenSkillBank.load()`**：`plan`、`verify_plan` 和 worker 都能读取 v2，同时保留 v1 格式。`scripts/reflect_skills.py` 负责真实反思调用、共享 quota/费用记账和失败时不冻结。尚未执行真实 LLM 反思、未生成真实 v2 技能库，也未测得技能收益；没有 grounded 候选时不会写快照。
 
 消融组合：
 
@@ -118,6 +120,6 @@ python scripts/run_experiments.py check artifacts/smoke-v1/plan.json
 
 `tests/test_vitabench.py` 覆盖两种历史格式、用户角色过滤、跨实例隔离、supersede、官方 memory factory、真实 Agent 继承关系、重生成前拦截、成本累加、当前轮偏好更新、冻结技能注入和过去日期拒绝。真实官方类测试对 `generate` 使用模拟替身，工具绝不执行、LLM API 不调用。
 
-已下载并核对官方完整数据集，固定 seed=42 按用户划分为 train 33 用户 / 464 子任务、dev 11 / 149、test 12 / 158。已完成真实 DeepSeek 的训练集 prefix2 试验：1 个训练用户、前 2 个子任务、1 次 trial，baseline 与 harness 均为 0.0；官方 `agent_cost` 聚合缺失，成本增长率为 `null`。一个较早的训练试跑已中止，不能作为完整评分结果。
+已下载并核对官方完整数据集，固定 seed=42 按用户划分为 train 33 用户 / 464 子任务、dev 11 / 149、test 12 / 158。已完成真实 DeepSeek 的训练集 prefix2 试验：1 个训练用户、前 2 个子任务、1 次 trial，baseline 与 harness 均为 0.0；官方 `agent_cost` 聚合缺失，成本增长率为 `null`。一个较早的训练试跑已中止，不能作为完整评分结果。零分诊断见 [reports/2026-10-27-zero-score-diagnosis](../reports/2026-10-27-zero-score-diagnosis/)：baseline 选择了高 GI 外卖和错误酒店品牌；harness 多次阻塞且最终无外卖订单。
 
-尚未完成开发集、保留测试集或五组真实消融，因此没有复现 `0.440 → 0.570`、`+8.6%` 成本、`0.38 → 0.48` 或 `+4.6pp`；这些数字不作为本实现的成绩。付费调用已暂停，免费平台接入仍需核对模型能力并实现相应额度约束。继续开发见 [HANDOFF.md](../HANDOFF.md)。
+尚未完成开发集、保留测试集或五组真实消融，因此没有复现 `0.440 → 0.570`、`+8.6%` 成本、`0.38 → 0.48` 或 `+4.6pp`；这些数字不作为本实现的成绩。旧付费调用已暂停；OpenCode 免费模型已接入请求数/积分账本，但当前免费额度返回 429，真实调用已停止（见 [reports/2026-10-27-provider-quota](../reports/2026-10-27-provider-quota/)）。继续开发见 [HANDOFF.md](../HANDOFF.md)。

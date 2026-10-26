@@ -126,24 +126,51 @@ def model_preflight(path: str | Path, model: str, *, environment=None) -> dict:
     max_tokens = resolved.get("max_tokens")
     if isinstance(max_tokens, bool) or not isinstance(max_tokens, int) or max_tokens < 1:
         raise ValueError("Explicit positive max_tokens is required for experimental control")
+    billing = resolved.get("billing", "paid")
+    if billing not in ("paid", "free"):
+        raise ValueError("Model config billing must be paid or free")
     tariff_names = [name for name in ("cost_1m_token_dollar", "cost_1m_token_cny") if name in resolved]
-    if len(tariff_names) != 1:
-        raise ValueError("Configure exactly one explicit USD or CNY token tariff")
-    currency = "CNY" if tariff_names[0] == "cost_1m_token_cny" else "USD"
-    prices = resolved[tariff_names[0]]
-    if not isinstance(prices, dict) or any(
-        isinstance(prices.get(k), bool) or not isinstance(prices.get(k), (int, float))
-        or not math.isfinite(prices[k]) or prices[k] <= 0
-        for k in ("prompt_price", "completion_price")
-    ):
-        raise ValueError("Explicit positive prompt/completion token prices are required for budget reservation")
+    free_quota = None
+    if billing == "free":
+        if tariff_names:
+            raise ValueError("A free model must not declare a token tariff; quota units are not prices")
+        quota = resolved.get("free_quota")
+        if not isinstance(quota, dict) or quota.get("unit") not in ("request", "credit"):
+            raise ValueError("Free models require free_quota.unit of request or credit")
+        unit = quota["unit"]
+        credit_per_request = quota.get("credit_per_request")
+        if unit == "credit" and (
+            isinstance(credit_per_request, bool) or not isinstance(credit_per_request, (int, float))
+            or not math.isfinite(credit_per_request) or credit_per_request <= 0
+        ):
+            raise ValueError("Credit-based free models require a positive free_quota.credit_per_request")
+        if unit == "request" and credit_per_request is not None:
+            raise ValueError("Request-based free models must not declare credit_per_request")
+        free_quota = {"unit": unit,
+                      "credit_per_request": float(credit_per_request) if unit == "credit" else None,
+                      "note": quota.get("note") if isinstance(quota.get("note"), str) else None}
+        currency = None
+        prices = None
+        pricing_basis = resolved.get("pricing_basis", "free_provider_quota")
+    else:
+        if len(tariff_names) != 1:
+            raise ValueError("Configure exactly one explicit USD or CNY token tariff")
+        currency = "CNY" if tariff_names[0] == "cost_1m_token_cny" else "USD"
+        prices = resolved[tariff_names[0]]
+        if not isinstance(prices, dict) or any(
+            isinstance(prices.get(k), bool) or not isinstance(prices.get(k), (int, float))
+            or not math.isfinite(prices[k]) or prices[k] <= 0
+            for k in ("prompt_price", "completion_price")
+        ):
+            raise ValueError("Explicit positive prompt/completion token prices are required for budget reservation")
+        pricing_basis = resolved.get("pricing_basis", "configured_token_prices")
     # The raw file hash detects changed configuration without exporting contents.
     return {"path": str(path), "sha256": _sha(path), "model": model,
             "endpoint_host": parsed.hostname if parsed else None,
             "required_variable_names": sorted(required), "missing_variable_names": sorted(missing),
             "credential_present": key_present, "max_tokens": max_tokens,
-            "currency": currency,
-            "pricing_basis": resolved.get("pricing_basis", "configured_token_prices"),
+            "billing": billing, "currency": currency, "free_quota": free_quota,
+            "pricing_basis": pricing_basis,
             "ready": not missing and key_present}
 
 
@@ -269,27 +296,65 @@ def verify_plan(path: str | Path, *, require_credentials: bool = False) -> dict:
 
 
 def execute_plan(path: str | Path, *, budget_usd: float | None = None, budget_cny: float | None = None,
+                 max_requests: int | None = None, max_credits: float | None = None,
                  budget_ledger: str | Path | None = None) -> dict:
-    """Run real evaluations with shared conservative per-call cost reservation.
+    """Run real evaluations with a shared pre-call cost or free-quota reservation.
 
-    Provider billing may differ from the configured token prices. The reservation
-    guard prevents new requests when local reserved funds are exhausted; a
-    provider-side cap remains the only authoritative billing cap.
+    Paid models reserve token-price bounds. Genuinely free models reserve one
+    request (or a configured credit cost) per call; zero token prices are never
+    supplied as a workaround. Provider billing/quota remains authoritative.
     """
-    if (budget_usd is None) == (budget_cny is None):
-        raise ValueError("Specify exactly one API budget currency")
-    budget = budget_cny if budget_cny is not None else budget_usd
-    currency = "CNY" if budget_cny is not None else "USD"
-    if isinstance(budget, bool) or not isinstance(budget, (int, float)) or not math.isfinite(budget) or budget <= 0:
-        raise ValueError("A positive finite API budget is required")
+    supplied = [value for value in (budget_usd, budget_cny, max_requests, max_credits) if value is not None]
+    if len(supplied) != 1:
+        raise ValueError("Specify exactly one of --budget-usd, --budget-cny, --max-requests or --max-credits")
+    for value, name in ((budget_usd, "API budget"), (budget_cny, "API budget"),
+                        (max_requests, "max_requests"), (max_credits, "max_credits")):
+        if value is None:
+            continue
+        if name == "max_requests":
+            if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+                raise ValueError("max_requests must be a positive integer")
+        elif isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or value <= 0:
+            raise ValueError(f"A positive finite {name} is required")
     path = Path(path).resolve()
     plan = verify_plan(path, require_credentials=True)
-    if plan["model"]["currency"] != currency:
-        raise ValueError("Budget currency must match the configured model tariff")
+    billing = plan["model"]["billing"]
+    if billing == "free":
+        quota = plan["model"]["free_quota"]
+        if quota["unit"] == "request":
+            if max_requests is None:
+                raise ValueError("Free request-based model requires --max-requests")
+            if isinstance(max_requests, bool) or not isinstance(max_requests, int) or max_requests < 1:
+                raise ValueError("max_requests must be a positive integer")
+            budget, currency = max_requests, "FREE"
+            mode, unit, pricing_basis = "requests", "request", "free_provider_quota"
+        else:
+            if max_credits is None:
+                raise ValueError("Free credit-based model requires --max-credits")
+            if (isinstance(max_credits, bool) or not isinstance(max_credits, (int, float))
+                    or not math.isfinite(max_credits) or max_credits <= 0):
+                raise ValueError("max_credits must be a positive finite number")
+            budget, currency = max_credits, "FREE"
+            mode, unit, pricing_basis = "credits", "credit", "free_provider_quota"
+        if budget_usd is not None or budget_cny is not None:
+            raise ValueError("Do not supply a cash budget for a free model; use a request/credit limit")
+    else:
+        if (budget_usd is None) == (budget_cny is None):
+            raise ValueError("Specify exactly one API budget currency")
+        budget = budget_cny if budget_cny is not None else budget_usd
+        currency = "CNY" if budget_cny is not None else "USD"
+        if isinstance(budget, bool) or not isinstance(budget, (int, float)) or not math.isfinite(budget) or budget <= 0:
+            raise ValueError("A positive finite API budget is required")
+        if plan["model"]["currency"] != currency:
+            raise ValueError("Budget currency must match the configured model tariff")
+        mode, unit, pricing_basis = "currency", "token_cost", plan["model"]["pricing_basis"]
     root, output = Path(plan["project_root"]), path.parent
-    execution = {"budget": budget, "currency": currency, "budget_enforcement": "shared pre-call SQLite reservation; configured prices",
+    execution = {"budget": budget, "currency": currency, "mode": mode, "unit": unit,
+                 "budget_enforcement": ("shared pre-call SQLite request/credit reservation"
+                                        if mode != "currency" else
+                                        "shared pre-call SQLite reservation; configured prices"),
                  "budget_ledger": str(Path(budget_ledger).resolve() if budget_ledger else output / "budget.sqlite3"),
-                 "pricing_basis": plan["model"]["pricing_basis"],
+                 "pricing_basis": pricing_basis,
                  "started_at": datetime.now(timezone.utc).isoformat(), "plan_sha256": _sha(path)}
     for run in plan["runs"]:
         if Path(run["result"]).exists():
@@ -335,11 +400,14 @@ def run_worker(path: str | Path, variant: str) -> None:
     os.environ["VITA_BUDGET_LEDGER"] = execution["budget_ledger"]
     os.environ["VITA_BUDGET_CURRENCY"] = execution["currency"]
     os.environ["VITA_BUDGET_LIMIT"] = str(execution["budget"])
+    os.environ["VITA_BUDGET_MODE"] = execution.get("mode", "currency")
+    os.environ["VITA_BUDGET_UNIT"] = execution.get("unit", "token_cost")
     # Explicit path ensures the imported upstream source matches the reviewed checkout.
     sys.path.insert(0, str(Path(plan["upstream"]) / "src"))
     from .budget import install_budget_guard
     install_budget_guard(execution["budget_ledger"], limit=execution["budget"], currency=execution["currency"],
-                         pricing_basis=execution["pricing_basis"])
+                         pricing_basis=execution["pricing_basis"], mode=execution.get("mode", "currency"),
+                         unit=execution.get("unit"))
     os.chdir(plan["upstream"])
     import vita.run as upstream_run
     import vita.domains.personalization.environment as personalization
@@ -427,12 +495,14 @@ def main(argv=None) -> None:
     create.add_argument("--max-steps", type=int, default=50)
     create.add_argument("--memory-extraction", choices=("rules", "llm"), default="llm")
     create.add_argument("--user-limit", type=int)
-    execute = sub.add_parser("execute", help="Run real paid evaluations after prerequisites are configured")
+    execute = sub.add_parser("execute", help="Run real evaluations after prerequisites and quota are configured")
     execute.add_argument("plan", type=Path)
     budgets = execute.add_mutually_exclusive_group(required=True)
     budgets.add_argument("--budget-usd", type=float)
     budgets.add_argument("--budget-cny", type=float)
-    execute.add_argument("--budget-ledger", type=Path, help="Reuse one ledger across train/dev/test plans to enforce the total project budget")
+    budgets.add_argument("--max-requests", type=int, help="Free-tier request quota; one unit per model call")
+    budgets.add_argument("--max-credits", type=float, help="Free-tier provider credit quota")
+    execute.add_argument("--budget-ledger", type=Path, help="Reuse one ledger across train/dev/test plans to enforce the total project quota")
     check = sub.add_parser("check")
     check.add_argument("plan", type=Path)
     worker = sub.add_parser("worker", help=argparse.SUPPRESS)
@@ -448,6 +518,7 @@ def main(argv=None) -> None:
                       "runs": [r["variant"] for r in result["runs"]], "model_ready": result["model"]["ready"]}
         elif args.command == "execute":
             result = execute_plan(args.plan, budget_usd=args.budget_usd, budget_cny=args.budget_cny,
+                                  max_requests=args.max_requests, max_credits=args.max_credits,
                                   budget_ledger=args.budget_ledger)
         elif args.command == "worker":
             run_worker(args.plan, args.variant)

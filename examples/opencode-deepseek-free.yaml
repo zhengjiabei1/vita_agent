@@ -1,0 +1,21 @@
+# OpenCode Zen free tier, checked 2026-10-27.
+#
+# Endpoint: https://opencode.ai/inference/openai/v1
+# Model: opencode/deepseek-v4.1-flash-free (1,000,000 context, 32,000 output)
+# The provider's free quota is counted per request and remains authoritative;
+# this project records a local request ledger so an experiment cannot exceed the
+# explicitly authorized request count. Do NOT add token prices here: zero
+# prices are not a valid paid tariff and must not be used to bypass the budget.
+#
+# Provide OPENCODE_API_KEY through the process environment. Never commit it.
+default:
+  base_url: https://opencode.ai/inference/openai/v1
+  api_key: ${OPENCODE_API_KEY}
+  temperature: 0.0
+  max_tokens: 4096
+models:
+  - name: deepseek-v4.1-flash-free
+    billing: free
+    free_quota:
+      unit: request
+      note: OpenCode Zen free-tier request quota; provider 429 stops the shared ledger.

@@ -214,6 +214,18 @@ _CUISINES = {
     "japanese": "japanese", "italian": "italian", "chinese": "chinese", "thai": "thai",
     "indian": "indian", "mexican": "mexican", "korean": "korean", "french": "french",
 }
+_HOTEL_BRANDS = {
+    "喜来登": "sheraton", "万豪": "marriott", "万怡": "courtyard", "威斯汀": "westin",
+    "艾美": "le_meridien", "丽思卡尔顿": "ritz_carlton", "瑞吉": "st_regis",
+    "希尔顿": "hilton", "凯悦": "hyatt", "洲际": "intercontinental",
+    "香格里拉": "shangri_la", "雅高": "accor", "如家": "home_inn",
+    "汉庭": "hanting", "全季": "ji_hotel", "亚朵": "atour",
+    "万达嘉华": "wanda_realm", "皇冠假日": "crowne_plaza",
+    "sheraton": "sheraton", "marriott": "marriott", "hilton": "hilton",
+    "hyatt": "hyatt", "intercontinental": "intercontinental",
+}
+_BRAND_NEGATIVE = re.compile(
+    r"一般|不太好|不好|差评|失望|不推荐|不会|不再|讨厌|隔音|态度|踩雷|住腻", re.I)
 _ALLERGENS = {
     "花生": "peanut", "坚果": "tree_nut", "贝类": "shellfish", "甲壳类": "shellfish",
     "海鲜": "seafood", "虾": "shrimp", "牛奶": "milk", "乳制品": "milk", "鸡蛋": "egg",
@@ -223,6 +235,38 @@ _ALLERGENS = {
     "milk": "milk", "eggs": "egg", "egg": "egg", "wheat": "wheat", "soy": "soy",
     "sesame": "sesame", "gluten": "gluten",
 }
+
+
+def _brand_pattern() -> str:
+    names = sorted(_HOTEL_BRANDS, key=len, reverse=True)
+    parts = []
+    for name in names:
+        escaped = re.escape(name)
+        parts.append(escaped if re.search(r"[\u3400-\u9fff]", name) else r"\b" + escaped + r"\b")
+    return "(?:" + "|".join(parts) + ")"
+
+
+_BRAND = _brand_pattern()
+
+
+def _hotel_brand(clause: str) -> tuple[str, str] | None:
+    """Extract an explicit positive hotel-brand preference, not a mere mention."""
+    if _BRAND_NEGATIVE.search(clause):
+        return None
+    patterns = (
+        rf"(?:只认准|认准|只住|还是得选|最喜欢|喜欢|偏好|最爱|常住|"
+        rf"住得[^，。；;]{{0,8}}?(?:舒服|舒心|不错|好)|属)\s*(?:住|选|订)?\s*(?:品牌)?\s*({_BRAND})",
+        rf"(?:^|[，。；;])\s*(?:就|还是)?选({_BRAND})(?:集团|酒店|吧)?",
+        rf"({_BRAND})(?:集团|酒店)?(?:住得|住着|的体验|体验感)(?:真|很|超|挺)?(?:舒服|舒心|不错|好)",
+    )
+    matches = []
+    for pattern in patterns:
+        for match in re.finditer(pattern, clause):
+            matches.append((match.end(1), match.group(1), match.group(0)))
+    if not matches:
+        return None
+    _, name, quote = max(matches)
+    return _HOTEL_BRANDS[name.casefold() if name.isascii() else name], quote
 
 
 def _unquoted(text: str) -> str:
@@ -297,4 +341,10 @@ def extract_preferences(evidence: Evidence, domain: str = "global") -> list[dict
                     items["cuisine"] = {"domain": domain, "slot": "cuisine", "value": _CUISINES[name],
                         "strength": "soft", "operator": "eq", "quote": cuisine_match.group(0)}
                     break
+        brand = _hotel_brand(clause)
+        if brand:
+            # Brand loyalty is a soft preference: it guides retrieval, but it
+            # cannot replace a trusted constraint or a current hard requirement.
+            items["hotel_brand"] = {"domain": domain, "slot": "hotel_brand", "value": brand[0],
+                "strength": "soft", "operator": "eq", "quote": brand[1]}
     return list(items.values())
