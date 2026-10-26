@@ -1,0 +1,60 @@
+{
+  "harness": {
+    "schema_version": 1,
+    "cohort": {
+      "users": 1,
+      "trials_per_user": 1,
+      "paired_runs": 1,
+      "complete": true
+    },
+    "reward": {
+      "baseline_mean": 0.0,
+      "candidate_mean": 0.0,
+      "delta": 0.0,
+      "delta_percentage_points": 0.0,
+      "aggregation": "equal user weight; mean across trials of each user's mean subtask reward",
+      "paired_user_bootstrap_95ci": null,
+      "bootstrap_samples": 1000,
+      "bootstrap_seed": 42
+    },
+    "update_subset": {
+      "pairs": 1,
+      "baseline_mean": 0.0,
+      "candidate_mean": 0.0,
+      "delta": 0.0,
+      "aggregation": "micro mean over update-tagged subtask/trial pairs"
+    },
+    "update_subset_status": "available",
+    "cost": {
+      "currency": "CNY",
+      "baseline_agent_total": null,
+      "candidate_agent_total": null,
+      "overhead_percent": null,
+      "all_costs_recorded": false,
+      "status": "unknown",
+      "scope": "upstream recorded agent_cost only; excludes unrecorded memory, offline distillation, user and evaluator costs"
+    },
+    "settings_checked": [
+      "git_commit",
+      "seed",
+      "max_steps",
+      "max_errors",
+      "agent_info.llm",
+      "agent_info.llm_args",
+      "user_info.llm",
+      "user_info.llm_args",
+      "environment_info.domain_name"
+    ],
+    "settings_unverified": [
+      "evaluator_info.llm",
+      "evaluator_info.llm_args"
+    ],
+    "limitations": [
+      "No benchmark score or resume claim is assumed by this report.",
+      "A bootstrap interval describes these users, not proof of generalization or causality.",
+      "For skill-only gain compare frozen-bank versus no-bank with all other settings fixed.",
+      "Inspect generation retry and memory cost accounting before reporting total overhead.",
+      "Too few users for a user-level confidence interval."
+    ]
+  }
+}

@@ -1,0 +1,79 @@
+{
+  "schema_version": 1,
+  "recorded_date": "2026-10-26",
+  "status": "completed_training_diagnostic_only",
+  "upstream_commit": "f60169e89f30499cb7883f3dad76bd03facc908d",
+  "model": "deepseek-flash",
+  "cohort": {
+    "split": "train",
+    "users": 1,
+    "subtasks_per_user": 2,
+    "variants": [
+      "baseline",
+      "harness"
+    ],
+    "trials_per_variant": 1,
+    "subtask_executions": 4,
+    "seed": 42
+  },
+  "scores": {
+    "baseline_mean": 0.0,
+    "harness_mean": 0.0,
+    "delta": 0.0,
+    "update_baseline_mean": 0.0,
+    "update_harness_mean": 0.0,
+    "confidence_interval": null,
+    "agent_cost_overhead_percent": null
+  },
+  "cost_accounting": {
+    "currency": "CNY",
+    "pricing_basis": "peak_uncached_upper_bound",
+    "invoice_verified": false,
+    "budget_ceiling_cny": 20.0,
+    "completed_prefix2_requests": [
+      {
+        "state": "settled",
+        "requests": 64,
+        "input_tokens": 1355720,
+        "output_tokens": 12249,
+        "token_price_estimate_cny": 2.809432,
+        "reserved_or_settled_cny": 2.809432
+      }
+    ],
+    "historical_all_requests_including_aborted_pilot": [
+      {
+        "state": "settled",
+        "requests": 157,
+        "input_tokens": 4219555,
+        "output_tokens": 27375,
+        "token_price_estimate_cny": 8.65811,
+        "reserved_or_settled_cny": 8.65811
+      },
+      {
+        "state": "uncertain",
+        "requests": 1,
+        "input_tokens": null,
+        "output_tokens": null,
+        "token_price_estimate_cny": null,
+        "reserved_or_settled_cny": 0.529772
+      }
+    ],
+    "ledger_sha256": "4077187171119587c9f39784d792836e5496551703d5d114a2f696802a20ed8d",
+    "completed_request_assignment": "Ledger created_at >= prefix2 execution started_at, rounded to seconds; no later experiment calls recorded in this snapshot.",
+    "interpretation": "Configured peak uncached token-price estimates and outstanding reservations, NOT a provider invoice. Caching/off-peak prices may be lower. Missing agent aggregate costs remain null. Unknown in-flight response is retained as uncertain."
+  },
+  "excluded_run": {
+    "source": "artifacts/real-evaluation/train-v1",
+    "status": "interrupted exploratory pilot",
+    "reason": "Stopped to preserve the project budget; no completed cohort score is reported.",
+    "included_in_historical_budget": true
+  },
+  "limitations": [
+    "Only a one-user training prefix, not held-out testing and not the official 771-subtask benchmark.",
+    "No performance improvement has been established.",
+    "Memory, skills-only and full-system variants have not been evaluated.",
+    "No real reflected skill bank has been produced or evaluated; v2 integration is unfinished.",
+    "Unit tests and demo outputs are not benchmark performance evidence.",
+    "Changing provider/model requires a fresh baseline and new predeclared plans."
+  ]
+}

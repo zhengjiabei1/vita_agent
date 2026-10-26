@@ -1,0 +1,13 @@
+# Set VITA_MODEL_CONFIG_PATH to your configured copy of this file.
+# Supply VITA_API_KEY through secure environment settings, never in this YAML.
+default:
+  base_url: https://api.openai.com/v1
+  api_key: ${VITA_API_KEY}
+  temperature: 0.0
+models:
+  - name: gpt-4.1
+    max_tokens: 8192
+    # Confirm your provider's current prices before a measured experiment.
+    cost_1m_token_dollar:
+      prompt_price: 2.0
+      completion_price: 8.0

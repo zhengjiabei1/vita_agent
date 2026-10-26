@@ -1,0 +1,10 @@
+{
+  "budget": 20.0,
+  "currency": "CNY",
+  "budget_enforcement": "shared pre-call SQLite reservation; configured prices",
+  "budget_ledger": "<ORIGINAL_PROJECT_ROOT>/artifacts/real-evaluation/shared-budget.sqlite3",
+  "pricing_basis": "peak_uncached_upper_bound",
+  "started_at": "2026-10-26T10:54:01.125694+00:00",
+  "plan_sha256": "b3d35d269ac238d2f5a7fd79d536f6ff5551d4d6e7c5b2ccaef1ccc01534683d",
+  "archive_notice": "Historical provenance only. Paths were redacted. Do not execute; create a new plan for the new model/config/source."
+}

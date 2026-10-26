@@ -1,0 +1,19 @@
+# Official docs checked on 2026-10-26:
+# https://api-docs.deepseek.com/zh-cn/quick_start/pricing
+# deepseek-flash resolves to DeepSeek-V4.1-Flash-1017.
+# Use peak, UNCACHED pricing as a conservative CNY cost upper bound.
+# Actual bills can be lower due to prompt caching and off-peak discounts.
+default:
+  base_url: https://api.deepseek.com
+  api_key: ${VITA_API_KEY}
+  temperature: 0.0
+  max_tokens: 4096
+  extra_body:
+    thinking:
+      type: disabled
+models:
+  - name: deepseek-flash
+    cost_1m_token_cny:
+      prompt_price: 2.0
+      completion_price: 8.0
+    pricing_basis: peak_uncached_upper_bound

@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "vita-service-agent"
+version = "0.1.0"
+description = "Training-free personalized service agent with grounded constraints and offline skill evolution"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = []
+
+[project.optional-dependencies]
+dev = ["pytest>=8,<10"]
+vitabench = ["vita @ git+https://github.com/meituan-longcat/VitaBench-2.0.git@f60169e89f30499cb7883f3dad76bd03facc908d"]
+
+[project.scripts]
+vita-agent = "vita_agent.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]

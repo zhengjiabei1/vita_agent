@@ -1,0 +1,424 @@
+"""Optional integration with the official VitaBench 2.0 interfaces.
+
+The memory class works with ``vita run --memory-class``. Guarded execution is an
+opt-in runner because upstream constructs PersonalizationAgent directly. The
+observed-fact bridge intentionally supports only delivery/hotel creation and
+payment; unsupported writes fail closed. See docs/vitabench.md for boundaries.
+"""
+from __future__ import annotations
+
+from datetime import datetime, timedelta
+import json
+import math
+import os
+import re
+from uuid import uuid4
+
+from .memory import PreferenceMemory, extract_preferences
+from .models import Action, Evidence, Violation
+from .interactions import interaction_evidence
+from .semantic_memory import EvidenceExtractor, EvidenceHistory
+
+UPSTREAM_URL = "https://github.com/meituan-longcat/VitaBench-2.0"
+UPSTREAM_COMMIT = "f60169e89f30499cb7883f3dad76bd03facc908d"
+
+try:
+    from vita.memory.base import BaseMemory as _BaseMemory
+    VITA_AVAILABLE = True
+except ModuleNotFoundError as exc:
+    if exc.name != "vita":
+        raise  # An incomplete official install must not silently become the offline shim.
+    VITA_AVAILABLE = False
+
+    class _BaseMemory:
+        """Offline shim; official integration requires installing VitaBench."""
+
+        def __init__(self, language=None, top_k=5, **kwargs):
+            self.language, self.top_k = language, top_k
+
+        def get_tools(self):
+            return {}
+
+        @property
+        def tools(self):
+            return {}
+
+
+
+
+class StructuredPreferenceMemory(_BaseMemory):
+    """Official custom memory backend with isolated per-run SQLite by default.
+
+    No ground-truth preferences, evaluator rubrics or hidden user intentions are
+    accepted. Unsupported interaction formats are counted rather than inferred.
+    Extraction is deterministic and deliberately limited to explicit slot forms.
+    """
+
+    def __init__(self, language=None, user_id=None, top_k=5, path=":memory:", extraction=None, generator=None, **kwargs):
+        super().__init__(language=language, top_k=top_k, **kwargs)
+        self.user_id = str(user_id) if user_id is not None else "run-" + uuid4().hex
+        self.store = PreferenceMemory(path)
+        self.domain: str | None = None
+        self.diagnostics: list[dict] = []
+        self.history = EvidenceHistory(":memory:" if str(path) == ":memory:" else str(path) + ".history")
+        self.extraction = extraction or os.environ.get("VITA_MEMORY_EXTRACTION", "rules")
+        if self.extraction not in ("rules", "llm"):
+            raise ValueError("VITA_MEMORY_EXTRACTION must be rules or llm")
+        self.generator = generator
+        self._extracted: set[str] = set()
+        self.extraction_costs: list[float | None] = []
+
+    @staticmethod
+    def _model_generator(llm, llm_args):
+        if not llm:
+            raise ValueError("Semantic extraction requires a configured model")
+        from vita.utils.llm_utils import generate
+        from vita.data_model.message import SystemMessage, UserMessage
+        def invoke(payload):
+            response = generate(model=llm, messages=[SystemMessage(role="system", content=payload["system"]),
+                UserMessage(role="user", content=json.dumps(payload["evidence"], ensure_ascii=False))], **(llm_args or {}))
+            try:
+                data = json.loads(response.content or "")
+            except (ValueError, TypeError):
+                data = {}
+            return {"preferences": data.get("preferences") if isinstance(data, dict) else None,
+                    "cost": response.cost, "usage": response.usage}
+        return invoke
+
+    def read(self, query=None) -> str:
+        structured = self.store.render(self.user_id, query or "", domain=self.domain, top_k=self.top_k)
+        history = self.history.render(self.user_id, query or "", domain=self.domain, top_k=self.top_k,
+            inactive_evidence_ids=self.store.inactive_evidence_ids(self.user_id))
+        return structured + "\n\n" + history
+
+    def update(self, new_interactions, llm=None, llm_args=None, **kwargs) -> str:
+        pending = {}
+        for interaction in new_interactions:
+            try:
+                evidence_rows = interaction_evidence(interaction, self.user_id)
+            except (ValueError, TypeError, OverflowError):
+                self.diagnostics.append({"code": "invalid_interaction_timestamp"})
+                continue
+            if not evidence_rows:
+                self.diagnostics.append({"code": "no_explicit_user_dialogue"})
+            for evidence, domain in evidence_rows:
+                self.history.add(evidence, domain)
+                if evidence.id not in self._extracted:
+                    pending[evidence.id] = (evidence, domain)
+                for item in extract_preferences(evidence, domain=domain):
+                    try:
+                        self.store.remember(evidence, **item)
+                    except ValueError as exc:
+                        self.diagnostics.append({"code": "preference_rejected", "reason": str(exc)})
+        if self.extraction == "llm" and pending:
+            extractor = EvidenceExtractor(self.generator or self._model_generator(llm, llm_args))
+            rows = list(pending.values())
+            # Explicit bounded batches; no unmetered retries for invalid model JSON.
+            for offset in range(0, len(rows), 12):
+                batch = rows[offset:offset + 12]
+                result = extractor.extract(batch)
+                self.extraction_costs.append(result.cost)
+                self.diagnostics.extend(result.diagnostics)
+                evidence_by_id = {e.id: e for e, _ in batch}
+                for candidate in result.candidates:
+                    item = dict(candidate)
+                    evidence = evidence_by_id[item.pop("evidence_id")]
+                    if item["strength"] == "soft" and any(p.slot == item["slot"] and p.domain == item["domain"]
+                        for p in self.store.active(self.user_id, strength="hard")):
+                        item["slot"] = "proposed." + item["slot"]
+                    try:
+                        self.store.remember(evidence, **item)
+                    except ValueError:
+                        self.diagnostics.append({"code": "semantic_preference_rejected"})
+                self._extracted.update(e.id for e, _ in batch)
+        return self.read()
+
+    def reset(self):
+        self.store.reset(self.user_id)
+        self.diagnostics.clear()
+        self.history.reset(self.user_id)
+        self._extracted.clear()
+        self.extraction_costs.clear()
+
+    def close(self):
+        self.store.close()
+        self.history.close()
+
+
+_ID = r"[A-Za-z0-9_-]+"
+_NUMBER = r"(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?"
+
+
+class ObservedFacts:
+    """Strict bridge from observed official read-tool replies, never model claims.
+
+    Upstream serializes objects using custom repr strings. Only numeric product
+    facts with unambiguous identifiers are parsed; missing allergens stay unknown.
+    Caches must be cleared between subtasks and after mutations. No hidden DB or
+    evaluator fields are read. JSON tool replies are deliberately not invented.
+    """
+
+    def __init__(self):
+        self.products: dict[str, dict] = {}
+        self.rooms: dict[tuple[str, str], dict] = {}
+        self.orders: dict[str, dict] = {}
+
+    def clear(self):
+        self.products.clear()
+        self.rooms.clear()
+        self.orders.clear()
+
+    def observe(self, name: str, content: str, evidence_id: str, error: bool = False):
+        if error or not isinstance(content, str):
+            return
+        if name == "get_delivery_product_info":
+            # Anchor known fixed fields; reject ambiguous injected field markers.
+            required = ("store_id=", "product_id=", "quantity=", "price=")
+            if not content.startswith("StoreProduct(") or any(content.count(k) != 1 for k in required):
+                return
+            store = re.search(rf", store_id=({_ID}), product_name=", content)
+            product = re.search(rf", product_id=({_ID}), attributes=", content)
+            tail = re.search(rf", quantity=({_NUMBER}), price=({_NUMBER}), tags=", content)
+            if store and product and tail:
+                quantity, price = map(float, tail.groups())
+                if math.isfinite(quantity) and math.isfinite(price):
+                    self.products[product[1]] = {"store_id": store[1], "quantity": quantity,
+                        "price": price, "_evidence_id": evidence_id}
+        elif name == "get_ota_hotel_info":
+            header = re.match(rf"Hotel Info:\nHotel\(hotel_id=({_ID}), hotel_name=", content)
+            if not header or content.count("hotel_id=") != 1:
+                return
+            pattern = rf"HotelProduct\(room_type=[^\n]*?, date=(\d{{4}}-\d{{2}}-\d{{2}}), price=({_NUMBER}), quantity=({_NUMBER}), room_id=({_ID})\)"
+            for match in re.finditer(pattern, content):
+                date, price, quantity, room_id = match.groups()
+                if math.isfinite(float(price)) and math.isfinite(float(quantity)):
+                    self.rooms[(header[1], room_id)] = {"total_price": float(price),
+                        "available": float(quantity) > 0, "date": date, "_evidence_id": evidence_id}
+        elif name in ("create_delivery_order", "create_hotel_order"):
+            expected_type = "delivery" if name == "create_delivery_order" else "hotel"
+            header = re.match(rf"Order\(order_id:({_ID}), order_type:({expected_type}), user_id:({_ID}),", content)
+            prices = re.findall(rf"(?:^|, )total_price:({_NUMBER}),", content)
+            if header and len(prices) == 1 and math.isfinite(float(prices[0])):
+                self.orders[header[1]] = {"total_price": float(prices[0]), "available": True,
+                    "user_id": header[3], "order_type": header[2], "_evidence_id": evidence_id}
+            # Inventory observations become stale after any attempted creation.
+            self.products.clear()
+            self.rooms.clear()
+        elif name.startswith("pay_"):
+            self.orders.clear()
+
+    def resolve(self, action: Action) -> dict:
+        args = action.arguments
+        if action.tool == "create_delivery_order":
+            ids, counts = args.get("product_ids"), args.get("product_cnts")
+            if not isinstance(ids, list) or not ids or not isinstance(counts, list) or len(ids) != len(counts):
+                return {}
+            if any(not isinstance(item, str) for item in ids) or len(set(ids)) != len(ids):
+                return {}
+            if any(not isinstance(count, int) or isinstance(count, bool) or count <= 0 for count in counts):
+                return {}
+            products = [self.products.get(item) for item in ids]
+            if any(not product or product["store_id"] != args.get("store_id") for product in products):
+                return {}
+            return {"total_price": sum(p["price"] * n for p, n in zip(products, counts)),
+                    "available": all(p["quantity"] >= n for p, n in zip(products, counts)),
+                    "_evidence_id": ",".join(p["_evidence_id"] for p in products)}
+        if action.tool == "create_hotel_order":
+            if not all(isinstance(args.get(k), str) for k in ("hotel_id", "room_id")):
+                return {}
+            return dict(self.rooms.get((args.get("hotel_id"), args.get("room_id")), {}))
+        if action.tool in ("pay_delivery_order", "pay_hotel_order"):
+            if not isinstance(args.get("order_id"), str):
+                return {}
+            facts = self.orders.get(args.get("order_id"), {})
+            expected = "delivery" if action.tool == "pay_delivery_order" else "hotel"
+            return dict(facts) if facts.get("order_type") == expected else {}
+        return {}
+
+
+def make_guarded_agent_class():
+    """Build the optional actual upstream subclass only when VitaBench is installed."""
+    from vita.agent.personalization_agent import PersonalizationAgent
+    from vita.data_model.message import AssistantMessage, MultiToolMessage, SystemMessage
+    from vita.utils.llm_utils import generate
+    from .guards import ConstraintChecker, ToolSpec
+    from .official_facts import OfficialObservedFacts, get_official_specs, ignores_purchase_preferences
+
+    class GuardedPersonalizationAgent(PersonalizationAgent):
+        def __init__(self, *args, max_regenerations=2, enable_guards=None, skill_bank=None, **kwargs):
+            if not isinstance(max_regenerations, int) or not 0 <= max_regenerations <= 10:
+                raise ValueError("max_regenerations must be an integer in [0, 10]")
+            super().__init__(*args, **kwargs)
+            if enable_guards is None:
+                setting = os.environ.get("VITA_ENABLE_GUARDS", "1")
+                if setting not in ("0", "1"):
+                    raise ValueError("VITA_ENABLE_GUARDS must be 0 or 1")
+                enable_guards = setting == "1"
+            if not isinstance(enable_guards, bool):
+                raise ValueError("enable_guards must be boolean")
+            self.enable_guards = enable_guards
+            from .skills import FrozenSkillBank
+            skill_bank = skill_bank or os.environ.get("VITA_SKILL_BANK")
+            self._frozen_skills = (skill_bank if isinstance(skill_bank, FrozenSkillBank)
+                                   else FrozenSkillBank.load(skill_bank) if skill_bank else None)
+            self.max_regenerations = max_regenerations
+            self.observed_facts = OfficialObservedFacts()
+            self.guard_audit: list[dict] = []
+            self._submitted_writes: set[str] = set()
+            self._user_turn = 0
+            self._current_constraints = PreferenceMemory()
+            self._configure_checker()
+
+        @property
+        def system_prompt(self):
+            prompt = super().system_prompt
+            bank = getattr(self, "_frozen_skills", None)
+            if bank is not None:
+                domain = getattr(self, "_domain", None) or "general"
+                skills = bank.retrieve(self._current_instruction or "", domain=domain, limit=5)
+                if skills:
+                    prompt += ("\n\nReusable procedural guidance, subordinate to current evidence and hard constraints:\n"
+                               + "\n".join("- " + skill.lesson for skill in skills))
+            return prompt
+
+        def _configure_checker(self):
+            specs = get_official_specs()
+            for tool in self.tools:
+                kind = getattr(getattr(tool, "_func", None), "__tool_type__", None)
+                kind = getattr(kind, "value", kind)
+                if kind in ("read", "generic", "think"):
+                    required = tuple(tool.openai_schema.get("function", {}).get("parameters", {}).get("required", ()))
+                    specs[tool.name] = ToolSpec(required, read_only=True)
+            self._specs = specs
+            self.checker = ConstraintChecker(specs)
+            domains = {spec.domain for name, spec in specs.items()
+                       if name in {t.name for t in self.tools} and spec.domain}
+            self._domain = next(iter(domains)) if len(domains) == 1 else None
+            if isinstance(self.memory, StructuredPreferenceMemory):
+                self.memory.domain = self._domain
+
+        def update_tools(self, tools):
+            super().update_tools(tools)
+            self.observed_facts.clear()
+            self._submitted_writes.clear()
+            self._user_turn = 0
+            self._current_constraints.reset()
+            self._configure_checker()
+            domains = {spec.domain for name, spec in self._specs.items()
+                       if name in {t.name for t in tools} and spec.domain}
+            if isinstance(self.memory, StructuredPreferenceMemory):
+                self.memory.domain = next(iter(domains)) if len(domains) == 1 else None
+
+        def reset_state(self, message_history=None):
+            self.observed_facts.clear()
+            self._submitted_writes.clear()
+            self._user_turn = 0
+            self._current_constraints.reset()
+            return super().reset_state(message_history)
+
+        def generate_next_message(self, message, state):
+            incoming = message.tool_messages if isinstance(message, MultiToolMessage) else [message]
+            for item in incoming:
+                if item.role == "tool":
+                    self.observed_facts.observe(item.name, item.content, item.id, item.error)
+                elif item.role == "user" and isinstance(self.memory, StructuredPreferenceMemory):
+                    self._user_turn += 1
+                    turn_time = (datetime.fromisoformat(self.time[:19])
+                                 + timedelta(microseconds=self._user_turn)).isoformat()
+                    self.memory.update([{"type": "conversation", "timestamp": turn_time,
+                        "domain": self.memory.domain or "global",
+                        "content": {"role": "user", "content": item.content}}])
+                elif item.role == "user" and self.enable_guards:
+                    self._user_turn += 1
+                    evidence = Evidence(f"turn-{self._user_turn}", "current-user", item.content or "",
+                        float(self._user_turn))
+                    if evidence.text:
+                        for candidate in extract_preferences(evidence, self._domain or "global"):
+                            self._current_constraints.remember(evidence, **candidate)
+            state.messages.extend(incoming)
+            # Refresh memory every turn, including preferences stated in this turn.
+            state.system_messages = [SystemMessage(role="system", content=self.system_prompt)]
+            feedback = []
+            cost = 0.0
+            usage = {"prompt_tokens": 0, "completion_tokens": 0}
+            for attempt in range(self.max_regenerations + 1):
+                draft = generate(model=self.llm, tools=self.tools,
+                    messages=state.system_messages + state.messages + feedback,
+                    enable_think=self.enable_think, **self.llm_args)
+                if draft is None:
+                    raise RuntimeError("LLM returned no message")
+                cost = cost + draft.cost if cost is not None and draft.cost is not None else None
+                if usage is not None:
+                    if draft.usage is None or any(key not in draft.usage for key in usage):
+                        usage = None
+                    else:
+                        for key in usage:
+                            usage[key] += draft.usage[key]
+                if not self.enable_guards:
+                    draft.cost, draft.usage = cost, usage
+                    state.messages.append(draft)
+                    return draft, state
+                violations = []
+                writes = 0
+                write_signatures = []
+                for call in draft.tool_calls or []:
+                    action = Action(call.name, call.arguments, call.id or "proposal")
+                    spec = self._specs.get(call.name)
+                    writes += int(spec is None or not spec.read_only)
+                    if spec is None or not spec.read_only:
+                        signature = json.dumps([call.name, call.arguments], sort_keys=True, ensure_ascii=False)
+                        write_signatures.append(signature)
+                        if signature in self._submitted_writes:
+                            violations.append(Violation("duplicate_write", "This write was already submitted; inspect its result instead of retrying"))
+                    facts = self.observed_facts.resolve(action)
+                    preferences = (self.memory.store.active(self.memory.user_id,
+                        domain=spec.domain if spec else None, strength="hard")
+                        if isinstance(self.memory, StructuredPreferenceMemory) else
+                        self._current_constraints.active("current-user", domain=spec.domain if spec else None, strength="hard"))
+                    violations.extend(self.checker.check(action, [] if ignores_purchase_preferences(call.name) else preferences, facts))
+                    if call.name not in {tool.name for tool in self.tools}:
+                        violations.append(Violation("unsupported_tool", "Tool is not available in this subtask"))
+                    expected_user = self.user_profile.get("user_id")
+                    if spec and not spec.read_only and not expected_user:
+                        violations.append(Violation("missing_evidence", "Current account identity is unavailable"))
+                    if expected_user and call.arguments.get("user_id", expected_user) != expected_user:
+                        violations.append(Violation("user_mismatch", "Action user_id differs from the current account"))
+                    if expected_user and facts.get("user_id", expected_user) != expected_user:
+                        violations.append(Violation("user_mismatch", "Observed order belongs to another account"))
+                    if spec and not spec.read_only and not ignores_purchase_preferences(call.name):
+                        for field in spec.date_fields:
+                            if field not in call.arguments:
+                                continue
+                            try:
+                                proposed = datetime.fromisoformat(call.arguments[field])
+                                now = datetime.fromisoformat(self.time[:19])
+                                too_old = proposed.date() < now.date() if len(call.arguments[field]) == 10 else proposed < now
+                                if too_old:
+                                    violations.append(Violation("invalid_dates", f"{field} is earlier than simulation time"))
+                            except (ValueError, TypeError):
+                                pass  # Schema checker reports malformed or incomparable dates.
+                        if facts.get("date"):
+                            try:
+                                if datetime.fromisoformat(facts["date"]).date() < datetime.fromisoformat(self.time[:19]).date():
+                                    violations.append(Violation("invalid_dates", "Observed product date is earlier than simulation time"))
+                            except (ValueError, TypeError):
+                                violations.append(Violation("invalid_dates", "Observed product date is invalid"))
+                if writes and len(draft.tool_calls or []) > 1:
+                    violations.append(Violation("multiple_mutations", "Emit one write call per turn after observing its inputs"))
+                if not violations:
+                    self._submitted_writes.update(write_signatures)
+                    draft.cost, draft.usage = cost, usage
+                    state.messages.append(draft)
+                    return draft, state
+                detail = [v.to_dict() for v in violations]
+                self.guard_audit.append({"attempt": attempt + 1, "violations": detail})
+                feedback = [SystemMessage(role="system", content=
+                    "Pre-execution checks rejected the draft. No tool was executed. Regenerate or ask for missing information. "
+                    + json.dumps(detail, ensure_ascii=False))]
+            blocked = AssistantMessage(role="assistant", content=
+                "当前操作缺少可验证的信息或违反已知约束，尚未执行。请补充信息或调整方案。",
+                cost=cost, usage=usage)
+            state.messages.append(blocked)
+            return blocked, state
+
+    return GuardedPersonalizationAgent

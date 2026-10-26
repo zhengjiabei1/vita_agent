@@ -1,0 +1,8 @@
+{
+  "source_sha256": "3a05f7e2742f204ae28b71db95b14e2daa94c9ff354f510a7d9c707564c7466e",
+  "derived_sha256": "c76985f042b0be3f751e7a97261e3fe70f6e96402bc6de7f358e025433c523fe",
+  "transform": "first 2 subtasks per user, all prior interactions within those subtasks unchanged",
+  "users": 56,
+  "subtasks": 112,
+  "purpose": "budget-limited predeclared prefix study; not full benchmark"
+}

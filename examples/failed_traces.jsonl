@@ -1,0 +1,3 @@
+{"trace_id":"train-trace-budget","task_id":"train-user-a","split":"train","success":false,"domain":"delivery","steps":[{"tool":"order_food","violations":[{"code":"budget_exceeded","message":"Total exceeded user's maximum"}]}]}
+{"trace_id":"train-trace-allergy","task_id":"train-user-b","split":"train","success":false,"domain":"delivery","steps":[{"tool":"order_food","violations":[{"code":"preference_conflict","message":"Candidate conflicts with a hard preference"},{"code":"missing_evidence","message":"Missing authoritative ingredient information"}]}]}
+{"trace_id":"train-trace-dates","task_id":"train-user-c","split":"train","success":false,"domain":"ota","steps":[{"tool":"book_hotel","violations":[{"code":"invalid_dates","message":"Checkout is not after checkin"}]}]}

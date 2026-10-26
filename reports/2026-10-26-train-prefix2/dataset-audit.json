@@ -1,0 +1,48 @@
+{
+  "dataset_sha256": "3a05f7e2742f204ae28b71db95b14e2daa94c9ff354f510a7d9c707564c7466e",
+  "dataset_bytes": 131234835,
+  "users": 56,
+  "subtasks": 771,
+  "seed": 42,
+  "split": {
+    "train": {
+      "users": 33,
+      "subtasks": 464,
+      "domains": {
+        "delivery": 239,
+        "ota": 84,
+        "instore": 141
+      }
+    },
+    "dev": {
+      "users": 11,
+      "subtasks": 149,
+      "domains": {
+        "ota": 28,
+        "delivery": 78,
+        "instore": 43
+      }
+    },
+    "test": {
+      "users": 12,
+      "subtasks": 158,
+      "domains": {
+        "delivery": 87,
+        "instore": 39,
+        "ota": 32
+      }
+    }
+  },
+  "train_preparation": {
+    "interaction_records": 10004,
+    "parse_errors": 0,
+    "unique_user_utterances": 27762,
+    "rule_extracted_utterances": 1,
+    "rule_extraction_fraction": 3.602045962106476e-05,
+    "extracted_slots": {
+      "total_price": 1
+    }
+  },
+  "interpretation": "Measured parsing/extraction coverage on train; NOT preference recall, task success, or model performance. No gold labels read.",
+  "benchmark_scores": null
+}

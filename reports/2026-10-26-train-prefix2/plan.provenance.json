@@ -1,0 +1,519 @@
+{
+  "schema_version": 1,
+  "created_at": "2026-10-26T10:53:43.547084+00:00",
+  "project_root": "<ORIGINAL_PROJECT_ROOT>",
+  "upstream": "<ORIGINAL_UPSTREAM_ROOT>",
+  "upstream_commit": "f60169e89f30499cb7883f3dad76bd03facc908d",
+  "dataset": {
+    "path": "<ORIGINAL_PROJECT_ROOT>/artifacts/real-evaluation/prefix2/personalization/tasks.json",
+    "sha256": "c76985f042b0be3f751e7a97261e3fe70f6e96402bc6de7f358e025433c523fe",
+    "split_seed": 42,
+    "user_count": 56,
+    "task_count": 56,
+    "subtask_count": 112,
+    "users": {
+      "train": [
+        "A891207",
+        "B865629",
+        "D975700",
+        "J528498",
+        "J681677",
+        "J741979",
+        "O309411",
+        "P722245",
+        "P978297",
+        "Q089190",
+        "Q420944",
+        "Q563889",
+        "R203124",
+        "T850685",
+        "U000828",
+        "U010122",
+        "U157368",
+        "U200109",
+        "U200110",
+        "U202619",
+        "U642088",
+        "U778202",
+        "U804031",
+        "U820719",
+        "U927361",
+        "U927362",
+        "U980811",
+        "V353677",
+        "W974351",
+        "X666389",
+        "Y208341",
+        "Z544664",
+        "Z687865"
+      ],
+      "dev": [
+        "B471882",
+        "E057330",
+        "K585155",
+        "L725289",
+        "U011408",
+        "U602549",
+        "U804032",
+        "U900122",
+        "V162854",
+        "X193757",
+        "Y481422"
+      ],
+      "test": [
+        "B048564",
+        "E941775",
+        "F360923",
+        "J365414",
+        "M793481",
+        "N453690",
+        "P581430",
+        "U778201",
+        "U901652",
+        "U973458",
+        "V746582",
+        "Y389667"
+      ]
+    },
+    "tasks": {
+      "train": [
+        "A891207",
+        "B865629",
+        "D975700",
+        "J528498",
+        "J681677",
+        "J741979",
+        "O309411",
+        "P722245",
+        "P978297",
+        "Q089190",
+        "Q420944",
+        "Q563889",
+        "R203124",
+        "T850685",
+        "U000828",
+        "U010122",
+        "U157368",
+        "U200109",
+        "U200110",
+        "U202619",
+        "U642088",
+        "U778202",
+        "U804031",
+        "U820719",
+        "U927361",
+        "U927362",
+        "U980811",
+        "V353677",
+        "W974351",
+        "X666389",
+        "Y208341",
+        "Z544664",
+        "Z687865"
+      ],
+      "dev": [
+        "B471882",
+        "E057330",
+        "K585155",
+        "L725289",
+        "U011408",
+        "U602549",
+        "U804032",
+        "U900122",
+        "V162854",
+        "X193757",
+        "Y481422"
+      ],
+      "test": [
+        "B048564",
+        "E941775",
+        "F360923",
+        "J365414",
+        "M793481",
+        "N453690",
+        "P581430",
+        "U778201",
+        "U901652",
+        "U973458",
+        "V746582",
+        "Y389667"
+      ]
+    },
+    "user_tasks": {
+      "A891207": [
+        "A891207"
+      ],
+      "B048564": [
+        "B048564"
+      ],
+      "B471882": [
+        "B471882"
+      ],
+      "B865629": [
+        "B865629"
+      ],
+      "D975700": [
+        "D975700"
+      ],
+      "E057330": [
+        "E057330"
+      ],
+      "E941775": [
+        "E941775"
+      ],
+      "F360923": [
+        "F360923"
+      ],
+      "J365414": [
+        "J365414"
+      ],
+      "J528498": [
+        "J528498"
+      ],
+      "J681677": [
+        "J681677"
+      ],
+      "J741979": [
+        "J741979"
+      ],
+      "K585155": [
+        "K585155"
+      ],
+      "L725289": [
+        "L725289"
+      ],
+      "M793481": [
+        "M793481"
+      ],
+      "N453690": [
+        "N453690"
+      ],
+      "O309411": [
+        "O309411"
+      ],
+      "P581430": [
+        "P581430"
+      ],
+      "P722245": [
+        "P722245"
+      ],
+      "P978297": [
+        "P978297"
+      ],
+      "Q089190": [
+        "Q089190"
+      ],
+      "Q420944": [
+        "Q420944"
+      ],
+      "Q563889": [
+        "Q563889"
+      ],
+      "R203124": [
+        "R203124"
+      ],
+      "T850685": [
+        "T850685"
+      ],
+      "U000828": [
+        "U000828"
+      ],
+      "U010122": [
+        "U010122"
+      ],
+      "U011408": [
+        "U011408"
+      ],
+      "U157368": [
+        "U157368"
+      ],
+      "U200109": [
+        "U200109"
+      ],
+      "U200110": [
+        "U200110"
+      ],
+      "U202619": [
+        "U202619"
+      ],
+      "U602549": [
+        "U602549"
+      ],
+      "U642088": [
+        "U642088"
+      ],
+      "U778201": [
+        "U778201"
+      ],
+      "U778202": [
+        "U778202"
+      ],
+      "U804031": [
+        "U804031"
+      ],
+      "U804032": [
+        "U804032"
+      ],
+      "U820719": [
+        "U820719"
+      ],
+      "U900122": [
+        "U900122"
+      ],
+      "U901652": [
+        "U901652"
+      ],
+      "U927361": [
+        "U927361"
+      ],
+      "U927362": [
+        "U927362"
+      ],
+      "U973458": [
+        "U973458"
+      ],
+      "U980811": [
+        "U980811"
+      ],
+      "V162854": [
+        "V162854"
+      ],
+      "V353677": [
+        "V353677"
+      ],
+      "V746582": [
+        "V746582"
+      ],
+      "W974351": [
+        "W974351"
+      ],
+      "X193757": [
+        "X193757"
+      ],
+      "X666389": [
+        "X666389"
+      ],
+      "Y208341": [
+        "Y208341"
+      ],
+      "Y389667": [
+        "Y389667"
+      ],
+      "Y481422": [
+        "Y481422"
+      ],
+      "Z544664": [
+        "Z544664"
+      ],
+      "Z687865": [
+        "Z687865"
+      ]
+    },
+    "subtasks_per_task": {
+      "A891207": 2,
+      "B048564": 2,
+      "B471882": 2,
+      "B865629": 2,
+      "D975700": 2,
+      "E057330": 2,
+      "E941775": 2,
+      "F360923": 2,
+      "J365414": 2,
+      "J528498": 2,
+      "J681677": 2,
+      "J741979": 2,
+      "K585155": 2,
+      "L725289": 2,
+      "M793481": 2,
+      "N453690": 2,
+      "O309411": 2,
+      "P581430": 2,
+      "P722245": 2,
+      "P978297": 2,
+      "Q089190": 2,
+      "Q420944": 2,
+      "Q563889": 2,
+      "R203124": 2,
+      "T850685": 2,
+      "U000828": 2,
+      "U010122": 2,
+      "U011408": 2,
+      "U157368": 2,
+      "U200109": 2,
+      "U200110": 2,
+      "U202619": 2,
+      "U602549": 2,
+      "U642088": 2,
+      "U778201": 2,
+      "U778202": 2,
+      "U804031": 2,
+      "U804032": 2,
+      "U820719": 2,
+      "U900122": 2,
+      "U901652": 2,
+      "U927361": 2,
+      "U927362": 2,
+      "U973458": 2,
+      "U980811": 2,
+      "V162854": 2,
+      "V353677": 2,
+      "V746582": 2,
+      "W974351": 2,
+      "X193757": 2,
+      "X666389": 2,
+      "Y208341": 2,
+      "Y389667": 2,
+      "Y481422": 2,
+      "Z544664": 2,
+      "Z687865": 2
+    }
+  },
+  "model": {
+    "path": "<ORIGINAL_PROJECT_ROOT>/examples/deepseek-flash.yaml",
+    "sha256": "a7160ce91da902125eca9bd1f2cace5c9fc1db0704ec0338d6f21c967dafce42",
+    "model": "deepseek-flash",
+    "endpoint_host": "api.deepseek.com",
+    "required_variable_names": [
+      "VITA_API_KEY"
+    ],
+    "missing_variable_names": [],
+    "credential_present": true,
+    "max_tokens": 4096,
+    "currency": "CNY",
+    "pricing_basis": "peak_uncached_upper_bound",
+    "ready": true
+  },
+  "phase": "train",
+  "partition": "train",
+  "selected_user_ids": [
+    "A891207"
+  ],
+  "selected_task_ids": [
+    "A891207"
+  ],
+  "num_trials": 1,
+  "seed": 42,
+  "max_steps": 20,
+  "skill_bank": null,
+  "memory_extraction": "llm",
+  "upstream_repairs": {
+    "patch_id": "vita-taxi-id-and-render-v1",
+    "upstream_commit": "f60169e89f30499cb7883f3dad76bd03facc908d",
+    "source_sha256": {
+      "vita.data_model.tasks": "71b7a86fbe33d1f2f380ab7046e0c4a06df9acfe13b1a39fabc3754984b07cda",
+      "vita.environment.db": "b2c3138fdc725dbdd83f4c74ed4114a8cf12a8e053226ee53f11fec80c104f4a",
+      "vita.domains.ota.tools": "a7b8f130c629df6ce5f43c45ddd8d656e7d9e3c0a682296ff5798a85bfb56a9e"
+    },
+    "enabled": true,
+    "status": "planned for every variant"
+  },
+  "source_sha256": {
+    "src/vita_agent/__init__.py": "26d220055cc3b90750a527ae4902234709b0cad686d0debc58ec4fb38c6af9c2",
+    "src/vita_agent/__main__.py": "3129adff95e0f38b87ab34cddfc27082c7892bcaec267ff5d40f160fdf55b44a",
+    "src/vita_agent/budget.py": "4f12ef62d95d600c417de7a62945adffe54fa429f8e2394c7b485273ccb2acf9",
+    "src/vita_agent/cli.py": "d8b1fb15c9f2d349744cc0d8cda88a63c8ffdd99eebf5f122ab21c84d6cd5f97",
+    "src/vita_agent/evaluation.py": "178f30321eb0f056191346e9e763f5c0cfeaf514116391d44116ce6b07f556d2",
+    "src/vita_agent/experiments.py": "6a130e8e3094fdef898ea9472dbc3748a2b71828404d4fc24cff99c0f63bf715",
+    "src/vita_agent/guards.py": "f652937b6504f79e09981332ad233db986176073c8f2fc7b3e8cc5023c0da1f9",
+    "src/vita_agent/harness.py": "9985da420e3cb4a3fab7347fde81c0abfd2fda80dbd90d5fbbb2d59884db6053",
+    "src/vita_agent/interactions.py": "79153f36e11be5a802144aba91ca5c3f1fceb1086f3b0c9468dd4ef276901ef6",
+    "src/vita_agent/memory.py": "bf8c80e0e83793d3fd07c1ced760a307e3b5a7be942b576277ff30029cdbfeca",
+    "src/vita_agent/models.py": "9407f00a85481a9e7072f68562f27cb5a76c7fafa43488c0558f779bfae817e8",
+    "src/vita_agent/official_facts.py": "a692b1e6ca975603863794361cfe44c4a9338120d2c7318633753cc1fac87629",
+    "src/vita_agent/sandbox.py": "ba76eedda451f0e595187b451c6680093fc4b28e2def2e2408a07d3f4341a2f6",
+    "src/vita_agent/semantic_memory.py": "be7a86c71e77f3765115a68f5ae799cc5a565039393c24113984f9a2d22ed86c",
+    "src/vita_agent/skills.py": "4a451c5e0f9600e5f5033ad6cd6d73ab8bb2e5e78273d215047b46f9a4ebab80",
+    "src/vita_agent/traces.py": "c4752c54767cdda092512aa2981ec30c2926e9e25a6106b04a43cccf9c49bbcc",
+    "src/vita_agent/upstream_fixes.py": "e78dc3a6da85b02a6e48a0c44a77af9ba45365105de08aabcf2c45bfc6bf2b6d",
+    "src/vita_agent/vitabench.py": "f78a42cf53010a91e39a2bc413b4017a24180758e7309594c5395e21cade3d90",
+    "scripts/audit_dataset.py": "3aab703cff30b4215806308d87fbfaf07217ba76dd1373f409a9ea4c9c4ecf42",
+    "scripts/run_experiments.py": "58bfaf3885cda0b03a2587a5a11c3ddb817ac0b28b514846f00fb6e094b8176f",
+    "scripts/run_vitabench.py": "0d246f089178d134c6ffda496cb8bde273b4f764d14d30fb551a20faf4788971"
+  },
+  "runs": [
+    {
+      "variant": "baseline",
+      "upstream_arguments": [
+        "run",
+        "--domain",
+        "personalization",
+        "--agent-llm",
+        "deepseek-flash",
+        "--user-llm",
+        "deepseek-flash",
+        "--evaluator-llm",
+        "deepseek-flash",
+        "--num-trials",
+        "1",
+        "--max-steps",
+        "20",
+        "--max-concurrency",
+        "1",
+        "--seed",
+        "42",
+        "--language",
+        "chinese",
+        "--evaluation-type",
+        "trajectory",
+        "--log-level",
+        "INFO",
+        "--save-to",
+        "<ORIGINAL_PROJECT_ROOT>/artifacts/real-evaluation/train-prefix2/baseline.json",
+        "--task-ids",
+        "A891207",
+        "--memory-type",
+        "full_context"
+      ],
+      "result": "<ORIGINAL_PROJECT_ROOT>/artifacts/real-evaluation/train-prefix2/baseline.json",
+      "environment": {
+        "VITA_MODEL_CONFIG_PATH": "<ORIGINAL_PROJECT_ROOT>/examples/deepseek-flash.yaml",
+        "VITA_ENABLE_GUARDS": "0",
+        "VITA_MEMORY_EXTRACTION": "llm",
+        "VITA_SKILL_BANK": ""
+      }
+    },
+    {
+      "variant": "harness",
+      "upstream_arguments": [
+        "run",
+        "--domain",
+        "personalization",
+        "--agent-llm",
+        "deepseek-flash",
+        "--user-llm",
+        "deepseek-flash",
+        "--evaluator-llm",
+        "deepseek-flash",
+        "--num-trials",
+        "1",
+        "--max-steps",
+        "20",
+        "--max-concurrency",
+        "1",
+        "--seed",
+        "42",
+        "--language",
+        "chinese",
+        "--evaluation-type",
+        "trajectory",
+        "--log-level",
+        "INFO",
+        "--save-to",
+        "<ORIGINAL_PROJECT_ROOT>/artifacts/real-evaluation/train-prefix2/harness.json",
+        "--task-ids",
+        "A891207",
+        "--memory-type",
+        "full_context"
+      ],
+      "result": "<ORIGINAL_PROJECT_ROOT>/artifacts/real-evaluation/train-prefix2/harness.json",
+      "environment": {
+        "VITA_MODEL_CONFIG_PATH": "<ORIGINAL_PROJECT_ROOT>/examples/deepseek-flash.yaml",
+        "VITA_ENABLE_GUARDS": "1",
+        "VITA_MEMORY_EXTRACTION": "llm",
+        "VITA_SKILL_BANK": ""
+      }
+    }
+  ],
+  "interpretation": "smoke/dev results are development diagnostics; only predeclared held-out full runs are test results",
+  "archive_notice": "Historical provenance only. Paths were redacted. Do not execute; create a new plan for the new model/config/source."
+}

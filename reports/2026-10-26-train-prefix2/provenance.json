@@ -1,0 +1,63 @@
+{
+  "schema_version": 1,
+  "files": [
+    {
+      "published_file": "baseline.json",
+      "source_artifact": "artifacts/real-evaluation/train-prefix2/baseline.json",
+      "source_sha256": "0b5d472e786f857a5e4fbfa29779ee53691d02c9c05e0268ed7718ef141e29cc",
+      "published_sha256": "0b5d472e786f857a5e4fbfa29779ee53691d02c9c05e0268ed7718ef141e29cc"
+    },
+    {
+      "published_file": "harness.json",
+      "source_artifact": "artifacts/real-evaluation/train-prefix2/harness.json",
+      "source_sha256": "507211c46d203942706b2adbcf8ee6cbcb10fe27732fc833fe6df04d200e3da2",
+      "published_sha256": "507211c46d203942706b2adbcf8ee6cbcb10fe27732fc833fe6df04d200e3da2"
+    },
+    {
+      "published_file": "comparisons.json",
+      "source_artifact": "artifacts/real-evaluation/train-prefix2/comparisons.json",
+      "source_sha256": "fa2eabaa0b483e24410f6b974dfb00c9281bc59a5e1293c5e46a6c852fdd73c0",
+      "published_sha256": "fa2eabaa0b483e24410f6b974dfb00c9281bc59a5e1293c5e46a6c852fdd73c0"
+    },
+    {
+      "published_file": "plan.provenance.json",
+      "source_artifact": "artifacts/real-evaluation/train-prefix2/plan.json",
+      "source_sha256": "b3d35d269ac238d2f5a7fd79d536f6ff5551d4d6e7c5b2ccaef1ccc01534683d",
+      "published_sha256": "ee0430bf17d4c88351b8417fbaa3c45a1bae48baff1dd40b8e179b23b1604bea"
+    },
+    {
+      "published_file": "execution.provenance.json",
+      "source_artifact": "artifacts/real-evaluation/train-prefix2/execution.json",
+      "source_sha256": "78abcf65810e3902e6acac21fbb6d08e8ecbe5dab6b50ee57ae9c975f5235ead",
+      "published_sha256": "80ab14daae93327c3774d0a59325b8147094b8adbcd8d5630c6baf78ed331a31"
+    },
+    {
+      "published_file": "dataset-audit.json",
+      "source_artifact": "artifacts/real-evaluation/dataset-audit.json",
+      "source_sha256": "b85a1d72ca815225a1c2520def6dc9c52aaeba15aa16d19f98ab134e6b55fd65",
+      "published_sha256": "b413734d1c2fd7d0976d7e137f02dab4f9d6c85ea30e07634f5bee3ade81a736"
+    },
+    {
+      "published_file": "user-splits.json",
+      "source_artifact": "artifacts/real-evaluation/user-splits.json",
+      "source_sha256": "e09d1d2e71249b543f611118870c753d26fcf64a6b54427c4e45167fb5c995aa",
+      "published_sha256": "cbac62926fd699b47015c4411708af8c6555b8f5f6ffbe05854d973c3e835dc4"
+    },
+    {
+      "published_file": "prefix2-derivation.json",
+      "source_artifact": "artifacts/real-evaluation/prefix2/derivation.json",
+      "source_sha256": "9eeb0590c69394f052b775f3a601b24f277aa51cc06a6b256c1e23c353115634",
+      "published_sha256": "0906e9486bb0023e0b68458ec1b0ce33e23e25103a14f41ca02813a0c65d8ba7"
+    }
+  ],
+  "redacted_field_counts": {
+    "api_key": 4
+  },
+  "transformations": [
+    "Recursively redact credential/header fields and recognizable credential literals.",
+    "Replace original project/upstream absolute roots with placeholders.",
+    "Mark plan/execution snapshots as archival provenance only.",
+    "Preserve train task content, tool traces, scores, null costs and usage counters.",
+    "Do not publish the dataset, SQLite ledger, logs or interrupted raw run."
+  ]
+}

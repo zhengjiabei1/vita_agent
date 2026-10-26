@@ -1,0 +1,302 @@
+import os
+from pathlib import Path
+import tempfile
+from unittest.mock import patch
+
+import pytest
+
+from vita_agent.models import Action
+# Upstream loads model configuration even when only importing its type classes.
+# This fixture contains no credentials and no usable remote endpoint.
+with tempfile.TemporaryDirectory() as _config_dir:
+    _config = Path(_config_dir) / "models.yaml"
+    _config.write_text("default: {}\nmodels: []\n", encoding="utf-8")
+    with patch.dict(os.environ, {"VITA_MODEL_CONFIG_PATH": str(_config)}):
+        from vita_agent.vitabench import (
+            ObservedFacts, StructuredPreferenceMemory, interaction_evidence,
+        )
+
+
+def interaction(text, date="2026-07-01", role="user", domain="delivery"):
+    return {"date": date, "domain": domain, "dialogue": [{"role": role, "content": text}]}
+
+
+def test_only_user_dialogue_is_evidence():
+    record = {"date": "2026-07-01", "dialogue": [
+        {"role": "assistant", "content": "My budget is 20"},
+        {"role": "user", "content": "My budget is 40"},
+        {"role": "tool", "content": "My budget is 10"}],
+        "behavior": [{"content": "My budget is 999"}],
+        "groundtruth": "My budget is 888", "evaluation_criteria": "My budget is 777"}
+    rows = interaction_evidence(record, "u1")
+    assert len(rows) == 1
+    assert rows[0][0].text == "My budget is 40"
+    assert rows[0][0].user_id == "u1"
+    assert interaction_evidence({"type": "conversation", "timestamp": "2026-07-01",
+                                 "content": "My budget is 20"}, "u1") == []
+
+
+def test_interaction_object_and_timestamp_order():
+    class Interaction:
+        def model_dump(self):
+            return {"type": "conversation", "timestamp": "2026-07-01 12:00:00",
+                    "content": {"messages": [{"role": "user", "content": "My budget is 20"}]}}
+    rows = interaction_evidence(Interaction(), "u1")
+    assert len(rows) == 1
+    assert rows == interaction_evidence(Interaction(), "u1")
+    with pytest.raises(ValueError, match="timestamp"):
+        interaction_evidence({"dialogue": [{"role": "user", "content": "hello"}]}, "u1")
+
+
+def test_plugin_updates_supersede_without_assistant_or_behavior_leakage():
+    memory = StructuredPreferenceMemory(user_id="u1", top_k=0)
+    memory.update([interaction("我的预算是50元")])
+    memory.update([interaction("我的预算是30元", "2026-07-02")])
+    memory.update([interaction("我的预算是999元", "2026-07-03", role="assistant")])
+    active = memory.store.active("u1", domain="delivery")
+    assert len(active) == 1 and active[0].value == 30
+    assert "30" in memory.read("hotel")  # Hard preferences survive top_k=0.
+    assert len(memory.store.history("u1", "total_price")) == 2
+    memory.reset()
+    assert memory.store.active("u1") == []
+    memory.close()
+
+
+def test_plugin_instance_and_user_isolation():
+    a, b = StructuredPreferenceMemory(user_id="same"), StructuredPreferenceMemory(user_id="same")
+    a.update([interaction("我的预算是50元")])
+    assert b.store.active("same") == []
+    missing_a, missing_b = StructuredPreferenceMemory(), StructuredPreferenceMemory()
+    assert missing_a.user_id != missing_b.user_id
+    for memory in (a, b, missing_a, missing_b):
+        memory.close()
+
+
+def test_semantic_plugin_uses_quotes_and_deduplicates_paid_extraction():
+    calls = []
+    def generator(payload):
+        calls.append(payload)
+        row = payload["evidence"][0]
+        return {"preferences": [{"evidence_id": row["evidence_id"], "domain": row["domain"],
+            "slot": "bakery_type", "value": "handmade", "strength": "soft", "operator": "eq",
+            "quote": "我喜欢手作面包", "certainty": "explicit"}],
+            "cost": 0.01, "usage": {"prompt_tokens": 100, "completion_tokens": 50}}
+    memory = StructuredPreferenceMemory(user_id="u1", extraction="llm", generator=generator)
+    event = interaction("我喜欢手作面包")
+    memory.update([event])
+    memory.update([event])
+    assert len(calls) == 1
+    assert memory.store.active("u1")[0].value == "handmade"
+    assert memory.extraction_costs == [0.01]
+    assert "手作面包" in memory.read("面包")
+    memory.close()
+
+
+def test_history_preserves_unrecognized_user_preferences_without_model():
+    memory = StructuredPreferenceMemory(user_id="u1", extraction="rules")
+    memory.update([interaction("帮我找手作面包，最好配送快一点")])
+    assert not memory.store.active("u1")
+    assert "手作面包" in memory.read("面包")
+    memory.close()
+
+
+def test_corrupt_timestamp_and_unrecognized_format_reported():
+    memory = StructuredPreferenceMemory()
+    memory.update([interaction("我的预算是30元", "invalid"), {"groundtruth": "budget 80"}])
+    assert [item["code"] for item in memory.diagnostics] == [
+        "invalid_interaction_timestamp", "no_explicit_user_dialogue"]
+    assert memory.store.active(memory.user_id) == []
+    memory.close()
+
+
+PRODUCT = "StoreProduct(store_name=shop, store_id=s1, product_name=rice, product_id=p1, attributes=regular, quantity=10, price=12.5, tags=['rice'])"
+HOTEL = "Hotel Info:\nHotel(hotel_id=h1, hotel_name=Hotel, score=4.5, star_rating=3, location=x, tags=[], products=HotelProduct(room_type=double, date=2026-07-03, price=200.0, quantity=2, room_id=r1))"
+
+
+def test_delivery_facts_are_grounded_in_read_reply_and_actual_quantities():
+    facts = ObservedFacts()
+    action = Action("create_delivery_order", {"product_ids": ["p1"], "product_cnts": [2], "store_id": "s1", "total_price": 1}, "key")
+    assert facts.resolve(action) == {}
+    facts.observe("assistant", PRODUCT, "fake")
+    assert facts.resolve(action) == {}
+    facts.observe("get_delivery_product_info", PRODUCT, "tool-result-1")
+    assert facts.resolve(action) == {"total_price": 25.0, "available": True, "_evidence_id": "tool-result-1"}
+    assert facts.resolve(Action(action.tool, {**action.arguments, "store_id": "wrong"}, "x")) == {}
+    assert facts.resolve(Action(action.tool, {**action.arguments, "product_cnts": [True]}, "x")) == {}
+    assert facts.resolve(Action(action.tool, {**action.arguments, "product_ids": ["p1", "p1"], "product_cnts": [1, 1]}, "x")) == {}
+
+
+def test_parser_rejects_ambiguous_or_nonfinite_fields():
+    facts = ObservedFacts()
+    for product in (PRODUCT.replace("rice, product_id", "rice, price=1, product_id"),
+                    PRODUCT.replace("price=12.5", "price=nan"),
+                    PRODUCT.replace("price=12.5", "price=1e999")):
+        facts.observe("get_delivery_product_info", product, "tool1")
+    assert facts.products == {}
+    facts.observe("get_delivery_product_info", PRODUCT, "tool1", error=True)
+    assert facts.products == {}
+
+
+def test_hotel_facts_missing_allergens_stay_unknown_and_caches_clear():
+    facts = ObservedFacts()
+    facts.observe("get_ota_hotel_info", HOTEL, "hotel-detail")
+    resolved = facts.resolve(Action("create_hotel_order", {"hotel_id": "h1", "room_id": "r1"}, "id"))
+    assert resolved["total_price"] == 200
+    assert resolved["available"]
+    assert "allergens" not in resolved
+    assert facts.resolve(Action("create_hotel_order", {"hotel_id": [], "room_id": {}}, "id")) == {}
+    facts.clear()
+    assert facts.rooms == {}
+
+
+def test_payment_only_has_facts_from_observed_correct_order_type():
+    facts = ObservedFacts()
+    facts.observe("create_delivery_order", "Order(order_id:o1, order_type:delivery, user_id:u1, store_id:s1, total_price:25.0, status:unpaid, products:[])", "create1")
+    assert facts.resolve(Action("pay_delivery_order", {"order_id": "o1"}, "pay"))["total_price"] == 25
+    assert facts.resolve(Action("pay_hotel_order", {"order_id": "o1"}, "pay")) == {}
+    facts.observe("pay_delivery_order", "Payment successful", "pay")
+    assert facts.orders == {}
+
+
+def test_real_upstream_memory_factory_if_available():
+    pytest.importorskip("vita.memory")
+    from vita.memory import create_memory
+    from vita.memory.base import BaseMemory
+    memory = create_memory(memory_class="vita_agent.vitabench.StructuredPreferenceMemory", user_id="u1")
+    assert isinstance(memory, BaseMemory)
+    assert memory.get_tools() == {}
+    memory.update([interaction("我的预算是30元")])
+    assert memory.store.active("u1")[0].value == 30
+    memory.close()
+
+
+def _upstream_agent(monkeypatch, drafts, budget=30, max_regenerations=2, **options):
+    pytest.importorskip("vita.agent.personalization_agent")
+    from vita.environment.tool import as_tool
+    from vita.environment.toolkit import is_tool, ToolType
+    from vita.utils import llm_utils
+    from vita_agent.vitabench import make_guarded_agent_class
+
+    calls = []
+    iterator = iter(drafts)
+
+    def generate(**kwargs):
+        calls.append(kwargs)
+        return next(iterator)
+
+    monkeypatch.setattr(llm_utils, "generate", generate)
+
+    @is_tool(ToolType.READ)
+    def get_delivery_product_info(product_id: str) -> str:
+        raise AssertionError("Guard must not execute tools")
+
+    @is_tool(ToolType.WRITE)
+    def create_delivery_order(user_id: str, store_id: str, product_ids: list[str],
+                              product_cnts: list[int], address: str, dispatch_time: str) -> str:
+        raise AssertionError("Guard must not execute tools")
+
+    @is_tool(ToolType.WRITE)
+    def cancel_delivery_order(order_id: str) -> str:
+        raise AssertionError("Unsupported tools must not execute")
+
+    memory = StructuredPreferenceMemory(user_id="u1")
+    memory.update([interaction(f"我的预算是{budget}元")])
+    cls = make_guarded_agent_class()
+    agent = cls(tools=[as_tool(get_delivery_product_info), as_tool(create_delivery_order), as_tool(cancel_delivery_order)],
+                domain_policy="Serve the user at {time}.", memory=memory, user_profile={"user_id": "u1"},
+                llm="mock", time="2026-07-01 12:00:00", max_regenerations=max_regenerations, **options)
+    return agent, memory, calls
+
+
+def test_actual_guarded_subclass_regenerates_and_accumulates_cost(monkeypatch):
+    pytest.importorskip("vita.data_model.message")
+    from vita.data_model.message import AssistantMessage, ToolCall, ToolMessage, MultiToolMessage
+    args = {"user_id": "u1", "store_id": "s1", "product_ids": ["p1"], "product_cnts": [3],
+            "address": "test address", "dispatch_time": "2026-07-01 13:00:00"}
+    drafts = [AssistantMessage(role="assistant", tool_calls=[ToolCall(id="bad", name="create_delivery_order", arguments=args)],
+                               cost=0.1, usage={"prompt_tokens": 10, "completion_tokens": 2}),
+              AssistantMessage(role="assistant", tool_calls=[ToolCall(id="good", name="create_delivery_order", arguments={**args, "product_cnts": [2]})],
+                               cost=0.2, usage={"prompt_tokens": 15, "completion_tokens": 3})]
+    agent, memory, calls = _upstream_agent(monkeypatch, drafts)
+    observation = MultiToolMessage(role="tool", tool_messages=[ToolMessage(role="tool", id="read1", name="get_delivery_product_info", content=PRODUCT)])
+    result, state = agent.generate_next_message(observation, agent.get_init_state())
+    assert result.tool_calls[0].id == "good"
+    assert result.cost == pytest.approx(0.3)
+    assert result.usage == {"prompt_tokens": 25, "completion_tokens": 5}
+    assert len(calls) == 2
+    assert agent.guard_audit[0]["violations"][0]["code"] == "budget_exceeded"
+    assert all(not getattr(message, "tool_calls", None) or message.tool_calls[0].id != "bad" for message in state.messages)
+    memory.close()
+
+
+def test_actual_guarded_subclass_blocks_unsupported_writes(monkeypatch):
+    pytest.importorskip("vita.data_model.message")
+    from vita.data_model.message import AssistantMessage, ToolCall, UserMessage
+    draft = AssistantMessage(role="assistant", tool_calls=[ToolCall(id="cancel", name="cancel_delivery_order", arguments={"order_id": "o1"})], cost=0.1)
+    agent, memory, calls = _upstream_agent(monkeypatch, [draft], max_regenerations=0)
+    result, state = agent.generate_next_message(UserMessage(role="user", content="取消订单"), agent.get_init_state())
+    assert not result.tool_calls
+    assert "尚未执行" in result.content
+    assert len(calls) == 1
+    assert any(v["code"] in ("unsupported_tool", "missing_evidence") for v in agent.guard_audit[0]["violations"])
+    memory.close()
+
+
+def test_current_user_turns_supersede_and_unknown_cost_stays_unknown(monkeypatch):
+    pytest.importorskip("vita.data_model.message")
+    from vita.data_model.message import AssistantMessage, UserMessage
+    drafts = [AssistantMessage(role="assistant", content="已更新", cost=None),
+              AssistantMessage(role="assistant", content="已更新", cost=0.1)]
+    agent, memory, _ = _upstream_agent(monkeypatch, drafts)
+    first, state = agent.generate_next_message(UserMessage(role="user", content="我的预算是40元"), agent.get_init_state())
+    second, state = agent.generate_next_message(UserMessage(role="user", content="现在预算改为60元"), state)
+    assert first.cost is None and first.usage is None
+    assert second.cost == 0.1 and second.usage is None
+    active = memory.store.active("u1", domain="delivery")
+    assert len(active) == 1 and active[0].value == 60
+    assert not memory.diagnostics
+    memory.close()
+
+
+def test_frozen_skill_prompt_and_explicit_guard_ablation(monkeypatch, tmp_path):
+    pytest.importorskip("vita.data_model.message")
+    from vita.data_model.message import AssistantMessage, ToolCall, UserMessage
+    from vita_agent.skills import SkillBank
+    bank = SkillBank()
+    bank.distill({"trace_id": "private-trace", "task_id": "private-task", "split": "train",
+                  "success": False, "domain": "delivery", "steps": [{"tool": "order", "violations": [
+                      {"code": "budget_exceeded", "message": "private information"}]}]})
+    snapshot = tmp_path / "frozen.json"
+    bank.freeze(snapshot)
+    bank.close()
+    draft = AssistantMessage(role="assistant", tool_calls=[ToolCall(id="unchecked", name="cancel_delivery_order", arguments={"order_id": "o1"})])
+    agent, memory, _ = _upstream_agent(monkeypatch, [draft], enable_guards=False, skill_bank=snapshot)
+    agent.set_current_instruction("check budget before order")
+    prompt = agent.system_prompt
+    assert "full payable total" in prompt
+    assert "private-trace" not in prompt and "private information" not in prompt
+    result, _ = agent.generate_next_message(UserMessage(role="user", content="取消订单"), agent.get_init_state())
+    assert result.tool_calls[0].id == "unchecked"
+    assert agent.guard_audit == []
+    memory.close()
+
+
+def test_room_date_is_checked_against_simulated_time(monkeypatch):
+    pytest.importorskip("vita.data_model.message")
+    from vita.data_model.message import AssistantMessage, ToolCall, ToolMessage
+    from vita.environment.tool import as_tool
+    from vita.environment.toolkit import is_tool, ToolType
+
+    @is_tool(ToolType.WRITE)
+    def create_hotel_order(hotel_id: str, room_id: str, user_id: str) -> str:
+        raise AssertionError("Must never execute")
+
+    draft = AssistantMessage(role="assistant", tool_calls=[ToolCall(id="past", name="create_hotel_order", arguments={
+        "hotel_id": "h1", "room_id": "r1", "user_id": "u1"})])
+    agent, memory, _ = _upstream_agent(monkeypatch, [draft], max_regenerations=0)
+    agent.update_tools([as_tool(create_hotel_order)])
+    reply = ToolMessage(role="tool", id="old-hotel", name="get_ota_hotel_info", content=HOTEL.replace("2026-07-03", "2026-06-30"))
+    result, _ = agent.generate_next_message(reply, agent.get_init_state())
+    assert not result.tool_calls
+    assert any(v["code"] == "invalid_dates" for v in agent.guard_audit[0]["violations"])
+    memory.close()

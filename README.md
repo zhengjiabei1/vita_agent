@@ -1,0 +1,110 @@
+# Training-Free Personalized Service Agent on VitaBench 2.0
+
+面向外卖、到店、旅行服务的**无需模型训练**的 Agent 研究原型。实现 draft → check → regenerate、带证据的偏好记忆，以及从失败轨迹离线提炼和冻结的技能库。
+
+对接官方 [meituan-longcat/VitaBench-2.0](https://github.com/meituan-longcat/VitaBench-2.0)，接口版本固定为 `f60169e89f30499cb7883f3dad76bd03facc908d`。本项目没有复现简历中的 `0.440 → 0.570`、`+8.6%` 成本、`0.38 → 0.48` 或 `4.6pp`；这些数值需要独立、可复现的正式实验。
+
+## 立即运行
+
+Python 3.10+。核心实现仅依赖标准库，不需要 API 密钥、GPU、向量数据库或模型下载。
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install -e '.[dev]'
+python -m vita_agent demo
+python -m pytest -q
+```
+
+`demo` 创建独立的 `artifacts/demo-*` 目录，生成完整轨迹 `report.json` 和只读技能快照 `skills.frozen.json`。也可使用 `--output <空目录>`；已有文件不会被覆盖。
+
+演示使用本地模拟服务与固定草稿序列：
+
+- 外卖预算从 60 更新为 30，旧值保留为 superseded；花生过敏是独立硬约束。
+- 高价沙拉被预算检查拦截，花生面被过敏检查拦截，最后执行米饭套餐。
+- 酒店退房早于入住的草稿被拦截，修正日期后执行。
+- 从训练失败记录产生任务级和步骤级技能，演示效用淘汰，再冻结用于推理。
+
+它验证控制流程，不衡量 LLM 能力，也不产生 VitaBench 分数。模拟环境不会下真实订单。
+
+## 实现结构
+
+```mermaid
+flowchart LR
+    E[用户证据] --> M[结构化偏好记忆]
+    M -->|硬约束全部注入 / 软偏好分层检索| P[草稿生成器]
+    S[冻结技能库] --> P
+    P --> C[确定性检查]
+    O[可信工具观察或目录] --> C
+    C -->|违规反馈，有界重试| P
+    C -->|通过| J[幂等执行日志]
+    J --> X[执行工具]
+    F[仅训练集失败轨迹] --> D[离线技能提炼与开发集淘汰]
+    D --> S
+```
+
+| 模块 | 实现 | 边界 |
+|---|---|---|
+| `harness.py` / `guards.py` | 校验预算、过敏原、日期、数量、库存、容量和必填字段；限制重生成；完整计入草稿成本；SQLite 幂等日志 | 事实由可信 resolver 提供；模型草稿不能自报价格作为证据；真实服务仍需原子校验和幂等支持 |
+| `memory.py` / `semantic_memory.py` | SQLite slot memory；引用和时间证据；supersede 覆盖链；可选 LLM 语义抽取和原始用户证据检索 | 未经确定性核实的语义硬约束降为候选；软偏好和原文回退采用词项检索，当前不是 embedding RAG |
+| `skills.py` / `skill_reflection.py` | 规则模板提炼、效用淘汰和 SHA-256 冻结；另有引用训练轨迹证据的 LLM 反思模块 | 反思 v2 快照尚未接入统一加载器及实验流程；没有真实技能收益数据；不从测试轨迹学习 |
+| `vitabench.py` / `official_facts.py` | 官方 `BaseMemory` 插件、受约束 Agent 子类；覆盖 30 个官方写工具的观察事实映射 | 必需事实缺失时拒绝；仅加载记忆插件不会启用执行检查；覆盖工具不代表所有业务规则完备 |
+| `experiments.py` / `budget.py` | 固定用户划分、实验计划哈希、五组消融入口、共享预算和请求用量账本 | 目前按货币单价预留预算；免费 API 的请求数或积分额度限制尚待接入 |
+| `evaluation.py` | 官方结果配对比较、偏好更新子集、按用户 bootstrap、成本变化 | 缺失 trial/分数拒绝比较；未知成本保留 `null` |
+
+## 编程接口
+
+```python
+from vita_agent.memory import PreferenceMemory
+from vita_agent.models import Evidence, Action, Proposal
+from vita_agent.harness import GuardedHarness
+from vita_agent.sandbox import CatalogSandbox, example_catalog
+
+memory = PreferenceMemory("artifacts/preferences.sqlite3")
+memory.remember(
+    Evidence("message-1", "user-1", "这次外卖预算最多30元", timestamp=1),
+    domain="delivery", slot="total_price", value=30,
+    strength="hard", operator="lte",
+)
+service = CatalogSandbox(example_catalog())
+harness = GuardedHarness(memory, service.resolve, service.execute)
+result = harness.run(
+    "user-1", "delivery", "帮我点午餐",
+    lambda context, feedback: Proposal(
+        Action("order_food", {"product_id": "rice-bowl", "quantity": 1}, "order-request-1")
+    ),
+)
+assert result.status == "executed"
+memory.close()
+harness.journal.close()
+```
+
+真实 planner 接收 `context`（当前请求、偏好、冻结技能）和上一轮 `feedback`，返回 `Proposal`；真实 resolver/executor 应绑定当前认证用户。`executed` 表示 executor 成功返回，业务失败必须由适配器抛出异常。发生执行超时或执行后日志写入失败时标记 `execution_uncertain`，禁止自动重试。
+
+规则偏好抽取支持有限的中英文显式预算、过敏和菜系表达；官方适配器还支持 `VITA_MEMORY_EXTRACTION=llm` 的带原文引用语义抽取。训练数据审计发现，规则仅从 27,762 条去重用户原话中抽取到 1 条，说明规则覆盖很窄；这不是偏好召回率或任务成功率。语义抽取和原文回退已实现，但尚未获得真实记忆消融结果。未知语言模式、没有 speaker 的历史文本、第三方陈述不会自动变成硬约束。手动 `remember()` 验证引用与来源，但调用者负责 slot/value 与原文语义相符。预算不做货币或人均/总额转换；过敏列表的覆盖代表完整列表替换，不自动追加。
+
+## 技能离线演化
+
+```bash
+python -m vita_agent distill examples/failed_traces.jsonl \
+  --output artifacts/skills.v1.json
+```
+
+正式使用时增加 `--heldout test_user_ids.json`，文件为测试用户对应 task ID 的 JSON 数组。每条失败轨迹必须有 `trace_id`、`task_id`、`split="train"`、`success=false`、`domain`、`steps`；示例文件只含手工构造数据。
+
+`SkillBank.record_outcome(skill_id, success, cost, split="dev")` 记录开发集使用结果。效用定义为 `(successes+1)/(trials+2) - 0.5 - mean_cost`，达到最低样本数且低于阈值时淘汰。成本的尺度影响阈值，须在开发集固定。冻结后禁止提炼、更新效用或淘汰；快照不可覆盖，加载校验内容哈希。哈希用于完整性检查，不能证明数据来源或实验划分正确。
+
+## 官方基准与实验
+
+见 [真实实验入口](docs/experiments.md)、[VitaBench 接入说明](docs/vitabench.md) 和 [评测与消融协议](docs/evaluation.md)。正式调用使用 `scripts/run_experiments.py`，以统一启用预算、脱敏、版本校验及各组一致的上游兼容补丁。官方数据、模型配置与 LLM 推理费用均独立于本地演示。
+
+```bash
+python -m vita_agent compare baseline.json candidate.json \
+  --output artifacts/comparison.json
+```
+
+建议以用户划分 train/dev/test，固定模型、采样、最大步骤、trial 数、数据版本，比较 baseline、仅 harness、仅 memory、仅 frozen skills 和全模块。在线测试用户的私有偏好可按基准协议更新；跨用户技能库在测试前冻结。
+
+截至 2026-10-26，已完成一次真实 DeepSeek 训练集短前缀试验：1 个训练用户、前 2 个子任务、1 次 trial，baseline 和 harness 两组平均分均为 **0.0**。这不是保留测试集成绩，也不能说明总体有效或无效。官方 `agent_cost` 聚合值缺失，成本增长率保持 `null`。尚未完成 memory、skills、full 组的真实消融、开发集筛选或测试集评估；付费调用已暂停，等待新平台接入。
+
+当前成果适合描述为“实现并测试了上述机制，完成官方接口接入和小规模真实训练试跑”。简历中的提升数字仍无实验支持。验证记录见 [verification.md](docs/verification.md)，换平台继续开发见 [HANDOFF.md](HANDOFF.md)。
