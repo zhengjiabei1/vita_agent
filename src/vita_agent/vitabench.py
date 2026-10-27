@@ -86,6 +86,15 @@ class StructuredPreferenceMemory(_BaseMemory):
                     "cost": response.cost, "usage": response.usage}
         return invoke
 
+    def _remember_evidence(self, evidence: Evidence, item: dict) -> None:
+        """A later soft opinion cannot erase an existing hard constraint."""
+        if item.get("strength") == "soft" and any(
+                preference.slot == item.get("slot")
+                and preference.domain in (item.get("domain"), "global")
+                for preference in self.store.active(self.user_id, strength="hard")):
+            item["slot"] = "proposed." + str(item["slot"])
+        self.store.remember(evidence, **item)
+
     def read(self, query=None) -> str:
         structured = self.store.render(self.user_id, query or "", domain=self.domain, top_k=self.top_k)
         history = self.history.render(self.user_id, query or "", domain=self.domain, top_k=self.top_k,
@@ -108,7 +117,7 @@ class StructuredPreferenceMemory(_BaseMemory):
                     pending[evidence.id] = (evidence, domain)
                 for item in extract_preferences(evidence, domain=domain):
                     try:
-                        self.store.remember(evidence, **item)
+                        self._remember_evidence(evidence, dict(item))
                     except ValueError as exc:
                         self.diagnostics.append({"code": "preference_rejected", "reason": str(exc)})
         if self.extraction == "llm" and pending:
@@ -124,11 +133,8 @@ class StructuredPreferenceMemory(_BaseMemory):
                 for candidate in result.candidates:
                     item = dict(candidate)
                     evidence = evidence_by_id[item.pop("evidence_id")]
-                    if item["strength"] == "soft" and any(p.slot == item["slot"] and p.domain == item["domain"]
-                        for p in self.store.active(self.user_id, strength="hard")):
-                        item["slot"] = "proposed." + item["slot"]
                     try:
-                        self.store.remember(evidence, **item)
+                        self._remember_evidence(evidence, item)
                     except ValueError:
                         self.diagnostics.append({"code": "semantic_preference_rejected"})
                 self._extracted.update(e.id for e, _ in batch)
@@ -171,6 +177,20 @@ class ObservedFacts:
         self.rooms.clear()
         self.orders.clear()
 
+    def _delivery_products(self, content: str, evidence_id: str):
+        pattern = rf"StoreProduct\(store_name=[^,]*, store_id=({_ID}), product_name=([^,]*), product_id=({_ID}), attributes=(.*?), quantity=({_NUMBER}), price=({_NUMBER}), tags=\[([^\]]*)\]\)"
+        for match in re.finditer(pattern, content):
+            store_id, _name, product_id, attributes, quantity, price, tag_text = match.groups()
+            if not (math.isfinite(float(quantity)) and math.isfinite(float(price))):
+                continue
+            minutes = re.search(r"配送时间约(\d+)分钟", attributes)
+            self.products[product_id] = {
+                "store_id": store_id, "quantity": float(quantity), "price": float(price),
+                "delivery_minutes": int(minutes[1]) if minutes else None,
+                "product_tags": re.findall(r"'([^']*)'", tag_text),
+                "_evidence_id": evidence_id,
+            }
+
     def observe(self, name: str, content: str, evidence_id: str, error: bool = False):
         if error or not isinstance(content, str):
             return
@@ -185,19 +205,9 @@ class ObservedFacts:
                     "store_tags": tags, "delivery_minutes": int(minutes[1]) if minutes else None,
                     "_evidence_id": evidence_id,
                 }
+                self._delivery_products(content, evidence_id)
         elif name == "get_delivery_product_info":
-            # Anchor known fixed fields; reject ambiguous injected field markers.
-            required = ("store_id=", "product_id=", "quantity=", "price=")
-            if not content.startswith("StoreProduct(") or any(content.count(k) != 1 for k in required):
-                return
-            store = re.search(rf", store_id=({_ID}), product_name=", content)
-            product = re.search(rf", product_id=({_ID}), attributes=", content)
-            tail = re.search(rf", quantity=({_NUMBER}), price=({_NUMBER}), tags=", content)
-            if store and product and tail:
-                quantity, price = map(float, tail.groups())
-                if math.isfinite(quantity) and math.isfinite(price):
-                    self.products[product[1]] = {"store_id": store[1], "quantity": quantity,
-                        "price": price, "_evidence_id": evidence_id}
+            self._delivery_products(content, evidence_id)
         elif name == "get_ota_hotel_info":
             header = re.match(rf"Hotel Info:\nHotel\(hotel_id=({_ID}), hotel_name=([^,\n]+),", content)
             if not header or content.count("hotel_id=") != 1:
@@ -258,6 +268,10 @@ class ObservedFacts:
             for key in ("store_name", "store_score", "store_tags", "delivery_minutes"):
                 if key in store and store[key] is not None:
                     facts[key] = store[key]
+            product_minutes = [p.get("delivery_minutes") for p in products if p.get("delivery_minutes") is not None]
+            if product_minutes:
+                facts["delivery_minutes"] = max(product_minutes)
+            facts["food_tags"] = sorted({tag for p in products for tag in p.get("product_tags", [])})
             return facts
         if action.tool == "create_hotel_order":
             if not all(isinstance(args.get(k), str) for k in ("hotel_id", "room_id")):
@@ -338,6 +352,10 @@ def make_guarded_agent_class():
             if self._unpaid_orders():
                 prompt += ("\n\nRuntime state: there are unpaid orders in this subtask. "
                            "Do not claim the task is complete; pay them or ask the user before finishing.")
+            if self.enable_guards:
+                prompt += ("\n\nBefore claiming completion, explicitly state the chosen item/room, price, "
+                           "address or date, delivery/check-in time, and how each known hard constraint is satisfied. "
+                           "Cite the observed values; do not guess missing fields.")
             return prompt
 
         def _configure_checker(self):

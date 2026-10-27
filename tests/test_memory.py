@@ -169,6 +169,22 @@ def test_explicit_phone_wakeup_amenity_is_hard_or_soft():
     assert soft["hotel_amenities"]["strength"] == "soft"
 
 
+def test_avoid_instant_noodles_is_grounded_in_negative_statement():
+    extracted = {item["slot"]: item for item in extract_preferences(
+        evidence(text="今天加班他们竟然打算吃方便面，一点都不健康，给我点个面条吧"))}
+    assert extracted["food_tags"]["value"] == ["方便面"]
+    assert extracted["food_tags"]["operator"] == "excludes"
+    assert extracted["food_tags"]["strength"] == "hard"
+
+
+def test_explicit_delivery_time_limit_is_hard():
+    extracted = {item["slot"]: item for item in extract_preferences(
+        evidence(text="帮我点个外卖，想吃清汤面，配送快一点的，最好25分钟以内，我中午休息时间不多。"))}
+    assert extracted["delivery_minutes"]["value"] == 25
+    assert extracted["delivery_minutes"]["operator"] == "lte"
+    assert extracted["delivery_minutes"]["strength"] == "hard"
+
+
 def test_hotel_feature_requirements_are_grounded_and_can_be_negative():
     positive = {item["slot"]: item for item in extract_preferences(
         evidence(text="要经济型的连锁酒店，房间要带浴缸的哈"))}

@@ -48,9 +48,22 @@
 - 支付失败的原因是用户模拟器把“支付吧 + 支付成功 + ###STOP###”合并在一条消息里，agent 没有机会在 STOP 前调用支付工具。仅靠“用户授权后自动支付”太晚；后续代码已改为**观察到 create 订单后立即由 guard 支付**，但本轮剩余 14 请求不足以验证。
 - memory 臂未选到带浴缸，说明 `hotel_features` 单槽会把“经济型/连锁/浴缸/停车”互相 supersede。后续代码已拆成 `hotel_feature.economy` 等独立槽位，也未在本轮验证。
 
+## 第二轮（round2.json）
+
+新增 `memory_harness`（结构化记忆 + guards，无技能），并修正自动支付、独立酒店设施槽、软偏好不得覆盖硬约束、方便面/配送时间规则。结果仍全部 **0.0**：
+
+- v4 baseline/harness/memory_harness 均 0.0；`memory_harness` 酒店选到带浴缸并支付，外卖“清汤面”已支付但标签含方便面。
+- v4 baseline 的外卖最终为“清汤面”、`shipping_time=25.0`、地址正确、非方便面、已支付，但 subtask 1 仍为 0.0。
+- v5 `memory_harness`（加入软/硬槽和防覆盖修正）在酒店阶段 `max_steps`，没有酒店订单；外卖选中**精确目标商品** `清汤面`（P00083），地址正确、`shipping_time=25.0`、非方便面、已支付，但 subtask 1 仍为 0.0。
+
+这组证据说明：**至少有一个子任务的最终状态看起来满足所有 rubric，但 trajectory judge 仍给 0 分**。下一步不应继续盲目加约束，而应先检查 trajectory judge 是否看到了足够证据（agent 最终回复是否逐条说明商品、地址、时间、非方便面），并可用 outcome evaluator 做离线诊断。另一种失败是硬设施约束无候选反馈导致 `max_steps`。
+
+第二轮 ledger：176/200 请求，输入 2,379,714、输出 35,668，估算 0.37836 USD，剩余 24。两轮累计 362/400 请求，估算约 0.7417 USD。
+
 ## 边界
 
 - 1 个 dev 用户、2 个子任务、1 trial；不能据此判断模块有效或无效。
 - 没有 skills/full；没有训练失败反思；没有测试集。
 - 三臂 0 分存在 floor effect，baseline 自己也是 0，无法测出模块增量。
+- “状态满足但 judge 0”不等同于评分器 bug；也可能是 agent 回复没有给 judge 明确证据，必须进一步诊断。
 - 旧计划已因后续源码变化失效；任何复跑必须新建计划。

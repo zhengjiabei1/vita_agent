@@ -28,6 +28,8 @@ VARIANTS = {
     "memory": {"memory": "structured", "guards": False, "skills": False},
     "skills": {"memory": "full_context", "guards": False, "skills": True},
     "full": {"memory": "structured", "guards": True, "skills": True},
+    # Diagnostic combination without a skill bank: structured memory + guards.
+    "memory_harness": {"memory": "structured", "guards": True, "skills": False},
 }
 _ENV = re.compile(r"^\$\{([A-Za-z_][A-Za-z0-9_]*)\}$")
 

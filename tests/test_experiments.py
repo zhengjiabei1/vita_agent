@@ -120,6 +120,15 @@ def test_valid_frozen_bank_used_read_only_and_full_uses_test(inputs, tmp_path):
     assert plan["runs"][0]["environment"]["VITA_SKILL_BANK"] == ""
 
 
+def test_memory_harness_diagnostic_variant_combines_structured_memory_and_guards(inputs):
+    plan = build_plan(**dict(inputs, variants=["baseline", "memory_harness"]))
+    memory_run = plan["runs"][1]
+    assert memory_run["environment"]["VITA_ENABLE_GUARDS"] == "1"
+    assert memory_run["upstream_arguments"][-2] == "--memory-class"
+    assert memory_run["upstream_arguments"][-1] == "vita_agent.vitabench.StructuredPreferenceMemory"
+    assert plan["skill_bank"] is None
+
+
 def test_v2_reflected_bank_is_accepted_by_the_runner(inputs, tmp_path):
     from vita_agent.skill_reflection import ReflectedCandidate, _lesson_id, freeze_reflected_bank
     from vita_agent.skills import Provenance, Skill

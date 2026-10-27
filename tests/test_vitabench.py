@@ -120,10 +120,30 @@ def test_delivery_facts_are_grounded_in_read_reply_and_actual_quantities():
     facts.observe("assistant", PRODUCT, "fake")
     assert facts.resolve(action) == {}
     facts.observe("get_delivery_product_info", PRODUCT, "tool-result-1")
-    assert facts.resolve(action) == {"total_price": 25.0, "available": True, "_evidence_id": "tool-result-1"}
+    assert facts.resolve(action) == {"total_price": 25.0, "available": True,
+                                     "_evidence_id": "tool-result-1", "food_tags": ["rice"]}
     assert facts.resolve(Action(action.tool, {**action.arguments, "store_id": "wrong"}, "x")) == {}
     assert facts.resolve(Action(action.tool, {**action.arguments, "product_cnts": [True]}, "x")) == {}
     assert facts.resolve(Action(action.tool, {**action.arguments, "product_ids": ["p1", "p1"], "product_cnts": [1, 1]}, "x")) == {}
+
+
+def test_delivery_minutes_are_parsed_and_enforced():
+    from vita_agent.guards import ConstraintChecker
+    from vita_agent.official_facts import get_official_specs
+    from vita_agent.models import Preference
+    product = PRODUCT.replace("attributes=regular", "attributes=清汤底, 配送时间约30分钟")
+    facts = ObservedFacts()
+    facts.observe("get_delivery_product_info", product, "tool-result-1")
+    action = Action("create_delivery_order",
+                    {"user_id": "u1", "product_ids": ["p1"], "product_cnts": [1],
+                     "store_id": "s1", "address": "addr", "dispatch_time": "2026-07-01 13:00:00"},
+                    "key")
+    resolved = facts.resolve(action)
+    assert resolved["delivery_minutes"] == 30
+    pref = Preference("p1", "u1", "delivery", "delivery_minutes", 25, "hard", "lte",
+                      "user-message-1", "25分钟以内", 1)
+    violations = ConstraintChecker(get_official_specs(), unknown_policy="warn").check(action, [pref], resolved)
+    assert "preference_conflict" in {v.code for v in violations}
 
 
 def test_parser_rejects_ambiguous_or_nonfinite_fields():
@@ -173,6 +193,12 @@ def test_hard_hotel_brand_preference_blocks_wrong_brand():
         Action("create_hotel_order", {"hotel_id": "h1", "room_id": "r1", "user_id": "u1"}, "id"),
         [pref], resolved)
     assert {v.code for v in violations} == {"preference_conflict"}
+
+
+def test_guard_prompt_requires_explicit_constraint_evidence(monkeypatch):
+    agent, memory, _ = _upstream_agent(monkeypatch, [])
+    assert "explicitly state the chosen item/room" in agent.system_prompt
+    memory.close()
 
 
 def test_new_unpaid_order_is_paid_by_the_guard_before_the_next_llm_turn(monkeypatch):
@@ -333,6 +359,20 @@ def test_actual_guarded_subclass_blocks_unsupported_writes(monkeypatch):
     assert "尚未执行" in result.content
     assert len(calls) == 1
     assert any(v["code"] == "unsupported_tool" for v in agent.guard_audit[0]["violations"])
+    memory.close()
+
+
+def test_later_soft_feature_cannot_erase_hard_feature():
+    from vita_agent.models import Evidence
+    memory = StructuredPreferenceMemory(user_id="u1")
+    memory.store.remember(Evidence("hard-parking", "u1", "一定要带停车场", 1),
+                          domain="global", slot="hotel_feature.parking", value=True,
+                          strength="hard", operator="eq")
+    memory.update([interaction("停车位有个保障", "2026-07-02")])
+    hard = memory.store.active("u1", strength="hard")
+    assert [(p.slot, p.value) for p in hard] == [("hotel_feature.parking", True)]
+    soft = memory.store.active("u1", strength="soft")
+    assert [p.slot for p in soft] == ["proposed.hotel_feature.parking"]
     memory.close()
 
 

@@ -1,0 +1,152 @@
+{
+  "round": "2",
+  "status": "dev_smoke_only",
+  "scope": "same dev user, first 2 subtasks, 1 trial",
+  "runs": {
+    "v4": [
+      {
+        "file": "baseline.json",
+        "reward": 0.0,
+        "subtask_rewards": {
+          "subtask_0_reward": 0.0,
+          "subtask_1_reward": 0.0
+        },
+        "termination": "max_steps",
+        "tool_errors": 0,
+        "delivery": {
+          "status": "paid",
+          "tags": [
+            "面食",
+            "清汤",
+            "手工面"
+          ],
+          "shipping_time": 25.0,
+          "address": "四川省成都市双流区华阳街道海昌路68号"
+        },
+        "hotels": [
+          {
+            "status": "unpaid",
+            "room_types": [
+              "经济大床房"
+            ]
+          }
+        ]
+      },
+      {
+        "file": "harness.json",
+        "reward": 0.0,
+        "subtask_rewards": {
+          "subtask_0_reward": 0.0,
+          "subtask_1_reward": 0.0
+        },
+        "termination": "user_stop",
+        "tool_errors": 0,
+        "delivery": {
+          "status": "paid",
+          "tags": [
+            "面食",
+            "清汤",
+            "日式",
+            "方便面"
+          ],
+          "shipping_time": 26.0,
+          "address": "四川省成都市双流区华阳街道海昌路68号"
+        },
+        "hotels": [
+          {
+            "status": "paid",
+            "room_types": [
+              "经济大床房"
+            ]
+          }
+        ]
+      },
+      {
+        "file": "memory_harness.json",
+        "reward": 0.0,
+        "subtask_rewards": {
+          "subtask_0_reward": 0.0,
+          "subtask_1_reward": 0.0
+        },
+        "termination": "user_stop",
+        "tool_errors": 0,
+        "delivery": {
+          "status": "paid",
+          "tags": [
+            "面食",
+            "清汤",
+            "方便面"
+          ],
+          "shipping_time": 25.0,
+          "address": "四川省成都市双流区华阳街道海昌路68号"
+        },
+        "hotels": [
+          {
+            "status": "paid",
+            "room_types": [
+              "经济大床房(带浴缸)"
+            ]
+          }
+        ]
+      }
+    ],
+    "v5": [
+      {
+        "file": "memory_harness.json",
+        "reward": 0.0,
+        "subtask_rewards": {
+          "subtask_0_reward": 0.0,
+          "subtask_1_reward": 0.0
+        },
+        "termination": "max_steps",
+        "tool_errors": 0,
+        "delivery": {
+          "status": "paid",
+          "tags": [
+            "面食",
+            "清汤",
+            "手工面"
+          ],
+          "shipping_time": 25.0,
+          "address": "四川省成都市双流区华阳街道海昌路68号"
+        },
+        "hotels": []
+      }
+    ]
+  },
+  "ledger": {
+    "requests": 176,
+    "limit": 200,
+    "remaining": 24,
+    "prompt_tokens": 2379714,
+    "completion_tokens": 35668,
+    "total_tokens": 2415382,
+    "measured_usd": 0.3783579,
+    "by_label": [
+      {
+        "label": "baseline",
+        "requests": 56,
+        "prompt_tokens": 1041274,
+        "completion_tokens": 10581,
+        "total_tokens": 1051855,
+        "measured": 0.1625397
+      },
+      {
+        "label": "harness",
+        "requests": 46,
+        "prompt_tokens": 716587,
+        "completion_tokens": 10191,
+        "total_tokens": 726778,
+        "measured": 0.11360265
+      },
+      {
+        "label": "memory_harness",
+        "requests": 74,
+        "prompt_tokens": 621853,
+        "completion_tokens": 14896,
+        "total_tokens": 636749,
+        "measured": 0.10221555
+      }
+    ]
+  }
+}

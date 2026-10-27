@@ -327,7 +327,18 @@ def extract_preferences(evidence: Evidence, domain: str = "global") -> list[dict
     if not isinstance(domain, str) or not domain.strip():
         raise ValueError("domain must be nonempty text")
     items: dict[str, dict[str, Any]] = {}
-    clauses = [s.strip() for s in re.split(r"[。！？!?；;，,\n]|\.(?!\d)", _unquoted(evidence.text)) if s.strip()]
+    unquoted = _unquoted(evidence.text)
+    delivery_limit = re.search(
+        r"(?:配送|送达|送到|外卖)[^。！？!?\n]{0,20}?(?:最好|尽量|要|在)?\s*(\d+)\s*分钟(?:以内|内|之内|以下)",
+        unquoted, re.I)
+    if delivery_limit:
+        items["delivery_minutes"] = {"domain": domain, "slot": "delivery_minutes",
+            "value": float(delivery_limit.group(1)), "strength": "hard", "operator": "lte",
+            "quote": delivery_limit.group(0)}
+    if "方便面" in unquoted and re.search(r"不健康|不要|不吃|别|避免|少吃", unquoted):
+        items["food_tags"] = {"domain": domain, "slot": "food_tags", "value": ["方便面"],
+            "strength": "hard", "operator": "excludes", "quote": "方便面"}
+    clauses = [s.strip() for s in re.split(r"[。！？!?；;，,\n]|\.(?!\d)", unquoted) if s.strip()]
     for clause in clauses:
         # Do not turn a retrospective purchase into a present requirement.
         if re.search(r"之前|以前|上次|过去|\b(?:previously|used to|last time)\b", clause, re.I) and not re.search(r"现在|改为|改成|更新为|\bnow\b", clause, re.I):
