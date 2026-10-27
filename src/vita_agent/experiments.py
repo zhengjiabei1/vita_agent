@@ -216,11 +216,16 @@ def build_plan(dataset: str | Path, output: str | Path, *, model_config: str | P
         raise ValueError("Official loader requires a personalization/tasks.json dataset path")
     partition = "test" if phase == "full" else "train" if phase == "train" else "dev"
     selected_users = data["users"][partition]
-    selected_users = selected_users[:1] if phase == "smoke" else selected_users[:3] if phase == "small" else selected_users
+    if user_limit is not None:
+        # An explicit cohort size defines the experiment: do not let the phase
+        # alias silently shrink it (smoke=1, small=3 remain the defaults).
+        selected_users = selected_users[:user_limit]
+    elif phase == "smoke":
+        selected_users = selected_users[:1]
+    elif phase == "small":
+        selected_users = selected_users[:3]
     if phase == "train" and user_limit is None:
         selected_users = selected_users[:3]
-    if user_limit is not None:
-        selected_users = selected_users[:user_limit]
     selected_tasks = sorted(t for u in selected_users for t in data["user_tasks"][u])
     if not selected_tasks:
         raise ValueError("Selected user partition is empty")

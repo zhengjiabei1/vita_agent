@@ -50,6 +50,12 @@ def test_user_split_is_deterministic_and_does_not_split_a_user(inputs):
     assert all(not x & y for i, x in enumerate(partitions) for y in partitions[i + 1:])
 
 
+def test_explicit_user_limit_overrides_the_smoke_cohort_cap(inputs):
+    plan = build_plan(**dict(inputs, user_limit=2, memory_extraction="rules"))
+    assert plan["phase"] == "smoke" and len(plan["selected_user_ids"]) == 2
+    assert len(plan["selected_task_ids"]) == 2
+
+
 def test_short_max_steps_is_rejected_to_avoid_premature_termination_zeros(inputs):
     with pytest.raises(ValueError, match="premature-termination"):
         build_plan(**dict(inputs, max_steps=20))
