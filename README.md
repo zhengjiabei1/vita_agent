@@ -119,10 +119,11 @@ python scripts/run_experiments.py execute artifacts/free-train-prefix2-v2/plan.j
 
 - 旧 DeepSeek：1 个训练用户、前 2 个子任务、baseline/harness 各 1 trial，两组均 **0.0**。
 - 新 OpenCode Go `deepseek-v4.1-flash`：同用户、同 2 子任务、baseline/harness/memory 各 1 trial，三臂均 **0.0**；update 子集均 0.0。
-- P0 修正后的 Go dev smoke 两轮：1 个 dev 用户、前 2 个子任务，baseline/harness/memory/memory_harness 均 **0.0**。第二轮 `memory_harness` 最终选中精确目标商品“清汤面”（地址正确、25 分钟、非方便面、已支付），但该子任务也触发了 `max_steps`，官方 evaluator 因此直接返回 0。
+- P0 修正后的 Go dev smoke 两轮（20 步）：1 个 dev 用户、前 2 个子任务，baseline/harness/memory/memory_harness 均 **0.0**。第二轮 `memory_harness` 最终选中精确目标商品“清汤面”（地址正确、25 分钟、非方便面、已支付），但该子任务触发了 `max_steps`，官方 evaluator 因此直接返回 0。
+- 第三轮 50 步 dev smoke（同一用户、2 子任务、每臂 1 trial；三个代码状态）：v6 为 0.0/0.0/**0.5**，v7 全 0.0，v8 为 **0.5**/0.0/0.0。拿到 1.0 的两单都是目标商品 `P00083 清汤面`、地址正确、`shipping_time=25.0`、非方便面、已支付。但 baseline 也能拿到 0.5，**不能**把 0.5 归因于 memory_harness；n=1、且三组代码不同，不是受控对比。
 
-两轮 Go 实验累计 **362/400 请求**，输入约 4.6M、输出约 81K Token，按配置单价估算约 **0.7417 USD**；当前剩余 24 请求，不足以完成 skills/full 五组消融和保留测试。工具调用、JSON、106,659 Token 长上下文和 usage 已通过预检。
+三轮 Go 实验累计 **618 请求**，输入约 8.19M、输出约 141K Token，按配置单价估算约 **1.3139 USD**；当前 300 额度剩余 44 请求。工具调用、JSON、106,659 Token 长上下文和 usage 已通过预检。
 
-零分诊断已修正：此前记为“状态满足但 judge 0 分”，复核日志后确认是 **`--max-steps 20` 触发官方过早终止惩罚**（`evaluator.py` 对 `MAX_STEPS` 直接返回 0，不调用 judge）。实验代码现已强制 `max_steps >= 50`，并在 BLOCK 时给出已观察候选，避免反复追问耗尽步数。没有证明任何模块收益；官方 `agent_cost` 聚合值缺失，成本增长率保持 `null`。
+零分诊断已修正：此前记为“状态满足但 judge 0 分”，复核日志后确认是 **`--max-steps 20` 触发官方过早终止惩罚**（`evaluator.py` 对 `MAX_STEPS` 直接返回 0，不调用 judge）。实验代码现已强制 `max_steps >= 50`，并在 BLOCK/系统提示中给出已观察候选；候选只有在每个硬约束都有可观察证据时才声称满足。没有证明任何模块收益；官方 `agent_cost` 聚合值缺失，成本增长率保持 `null`。
 
-当前成果适合描述为“实现并测试了上述机制，完成官方接口接入、新模型训练/dev 试跑和零分诊断”。简历中的提升数字仍无实验支持。验证记录见 [verification.md](docs/verification.md)，Go 训练结果见 [reports/2026-10-27-go-train-prefix2](reports/2026-10-27-go-train-prefix2/)，dev smoke 见 [reports/2026-10-27-go-dev-p0-smoke](reports/2026-10-27-go-dev-p0-smoke/)，零分诊断见 [reports/2026-10-27-zero-score-diagnosis](reports/2026-10-27-zero-score-diagnosis/)，额度记录见 [reports/2026-10-27-provider-quota](reports/2026-10-27-provider-quota/)，继续开发见 [HANDOFF.md](HANDOFF.md)。
+当前成果适合描述为“实现并测试了上述机制，完成官方接口接入、新模型训练/dev 试跑和零分诊断”。简历中的提升数字仍无实验支持。验证记录见 [verification.md](docs/verification.md)，Go 训练结果见 [reports/2026-10-27-go-train-prefix2](reports/2026-10-27-go-train-prefix2/)，dev smoke 见 [reports/2026-10-27-go-dev-p0-smoke](reports/2026-10-27-go-dev-p0-smoke/) 与 [50 步 dev smoke](reports/2026-10-27-go-dev-50step/)，零分诊断见 [reports/2026-10-27-zero-score-diagnosis](reports/2026-10-27-zero-score-diagnosis/)，额度记录见 [reports/2026-10-27-provider-quota](reports/2026-10-27-provider-quota/)，继续开发见 [HANDOFF.md](HANDOFF.md)。

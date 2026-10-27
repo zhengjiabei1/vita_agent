@@ -1,0 +1,339 @@
+{
+  "date": "2026-10-27",
+  "scope": "1 dev user (B471882), first 2 subtasks, 1 trial, max_steps=50",
+  "note": "three run groups on different code states; not a controlled comparison",
+  "groups": {
+    "v6": {
+      "runs": {
+        "baseline": {
+          "reward": 0.0,
+          "subtask_rewards": {
+            "subtask_0_reward": 0.0,
+            "subtask_1_reward": 0.0
+          },
+          "termination": "agent_stop",
+          "tool_errors": 0,
+          "messages": 38,
+          "states": [
+            {
+              "type": "hotel",
+              "status": "unpaid",
+              "hotel_id": null,
+              "rooms": [
+                "经济大床房"
+              ],
+              "total_price": 138.0
+            },
+            {
+              "type": "delivery",
+              "status": "paid",
+              "product_id": "S17790994829326737_P00086",
+              "product": "清汤肥肠面",
+              "tags": [
+                "面食",
+                "清汤",
+                "肥肠"
+              ],
+              "shipping_time": 25.0,
+              "address": "四川省成都市双流区华阳街道海昌路68号"
+            }
+          ]
+        },
+        "harness": {
+          "reward": 0.0,
+          "subtask_rewards": {
+            "subtask_0_reward": 0.0,
+            "subtask_1_reward": 0.0
+          },
+          "termination": "user_stop",
+          "tool_errors": 0,
+          "messages": 36,
+          "states": [
+            {
+              "type": "hotel",
+              "status": "paid",
+              "hotel_id": null,
+              "rooms": [
+                "经济大床房"
+              ],
+              "total_price": 138.0
+            },
+            {
+              "type": "delivery",
+              "status": "paid",
+              "product_id": "S17790994829326737_P00091",
+              "product": "汤达人清汤面",
+              "tags": [
+                "面食",
+                "清汤",
+                "方便面"
+              ],
+              "shipping_time": 25.0,
+              "address": "四川省成都市双流区华阳街道海昌路68号"
+            }
+          ]
+        },
+        "memory_harness": {
+          "reward": 0.5,
+          "subtask_rewards": {
+            "subtask_0_reward": 0.0,
+            "subtask_1_reward": 1.0
+          },
+          "termination": "user_stop",
+          "tool_errors": 0,
+          "messages": 49,
+          "states": [
+            {
+              "type": "hotel",
+              "status": "paid",
+              "hotel_id": null,
+              "rooms": [
+                "经济大床房"
+              ],
+              "total_price": 138.0
+            },
+            {
+              "type": "delivery",
+              "status": "paid",
+              "product_id": "S17790994829326737_P00083",
+              "product": "清汤面",
+              "tags": [
+                "面食",
+                "清汤",
+                "手工面"
+              ],
+              "shipping_time": 25.0,
+              "address": "四川省成都市双流区华阳街道海昌路68号"
+            }
+          ]
+        }
+      }
+    },
+    "v7": {
+      "runs": {
+        "baseline": {
+          "reward": 0.0,
+          "subtask_rewards": {
+            "subtask_0_reward": 0.0,
+            "subtask_1_reward": 0.0
+          },
+          "termination": "agent_stop",
+          "tool_errors": 0,
+          "messages": 33,
+          "states": [
+            {
+              "type": "hotel",
+              "status": "unpaid",
+              "hotel_id": null,
+              "rooms": [
+                "经济大床房"
+              ],
+              "total_price": 138.0
+            },
+            {
+              "type": "delivery",
+              "status": "paid",
+              "product_id": "S17790994829326737_P00091",
+              "product": "汤达人清汤面",
+              "tags": [
+                "面食",
+                "清汤",
+                "方便面"
+              ],
+              "shipping_time": 25.0,
+              "address": "四川省成都市双流区华阳街道海昌路68号"
+            }
+          ]
+        },
+        "harness": {
+          "reward": 0.0,
+          "subtask_rewards": {
+            "subtask_0_reward": 0.0,
+            "subtask_1_reward": 0.0
+          },
+          "termination": "user_stop",
+          "tool_errors": 0,
+          "messages": 39,
+          "states": [
+            {
+              "type": "hotel",
+              "status": "paid",
+              "hotel_id": null,
+              "rooms": [
+                "经济大床房(带浴缸)"
+              ],
+              "total_price": 139.0
+            },
+            {
+              "type": "delivery",
+              "status": "paid",
+              "product_id": "S17790994829326737_P00091",
+              "product": "汤达人清汤面",
+              "tags": [
+                "面食",
+                "清汤",
+                "方便面"
+              ],
+              "shipping_time": 25.0,
+              "address": "四川省成都市双流区华阳街道海昌路68号"
+            }
+          ]
+        },
+        "memory_harness": {
+          "reward": 0.0,
+          "subtask_rewards": {
+            "subtask_0_reward": 0.0,
+            "subtask_1_reward": 0.0
+          },
+          "termination": "agent_stop",
+          "tool_errors": 0,
+          "messages": 39,
+          "states": [
+            {
+              "type": "delivery",
+              "status": "paid",
+              "product_id": "S17790994829326737_P00073",
+              "product": "鸡汤面",
+              "tags": [
+                "面食",
+                "鸡汤"
+              ],
+              "shipping_time": 25.0,
+              "address": "四川省成都市双流区华阳街道海昌路68号"
+            }
+          ]
+        }
+      }
+    },
+    "v8": {
+      "runs": {
+        "baseline": {
+          "reward": 0.5,
+          "subtask_rewards": {
+            "subtask_0_reward": 0.0,
+            "subtask_1_reward": 1.0
+          },
+          "termination": "user_stop",
+          "tool_errors": 0,
+          "messages": 39,
+          "states": [
+            {
+              "type": "hotel",
+              "status": "unpaid",
+              "hotel_id": null,
+              "rooms": [
+                "经济大床房"
+              ],
+              "total_price": 138.0
+            },
+            {
+              "type": "delivery",
+              "status": "paid",
+              "product_id": "S17790994829326737_P00083",
+              "product": "清汤面",
+              "tags": [
+                "面食",
+                "清汤",
+                "手工面"
+              ],
+              "shipping_time": 25.0,
+              "address": "四川省成都市双流区华阳街道海昌路68号"
+            }
+          ]
+        },
+        "harness": {
+          "reward": 0.0,
+          "subtask_rewards": {
+            "subtask_0_reward": 0.0,
+            "subtask_1_reward": 0.0
+          },
+          "termination": "agent_stop",
+          "tool_errors": 0,
+          "messages": 41,
+          "states": [
+            {
+              "type": "hotel",
+              "status": "paid",
+              "hotel_id": null,
+              "rooms": [
+                "经济大床房"
+              ],
+              "total_price": 138.0
+            },
+            {
+              "type": "delivery",
+              "status": "paid",
+              "product_id": "S17790994829326737_P00091",
+              "product": "汤达人清汤面",
+              "tags": [
+                "面食",
+                "清汤",
+                "方便面"
+              ],
+              "shipping_time": 25.0,
+              "address": "四川省成都市双流区华阳街道海昌路68号"
+            }
+          ]
+        },
+        "memory_harness": {
+          "reward": 0.0,
+          "subtask_rewards": {
+            "subtask_0_reward": 0.0,
+            "subtask_1_reward": 0.0
+          },
+          "termination": "user_stop",
+          "tool_errors": 0,
+          "messages": 38,
+          "states": [
+            {
+              "type": "delivery",
+              "status": "paid",
+              "product_id": "S17790994829326737_P00020",
+              "product": "酸辣粉",
+              "tags": [
+                "粉类",
+                "酸辣"
+              ],
+              "shipping_time": 26.0,
+              "address": "四川省成都市双流区华阳街道海昌路68号"
+            }
+          ]
+        }
+      }
+    }
+  },
+  "ledger": {
+    "requests": 256,
+    "limit": 300,
+    "remaining": 44,
+    "prompt_tokens": 3574878,
+    "completion_tokens": 59962,
+    "measured_usd": 0.5722089,
+    "by_label": [
+      {
+        "label": "baseline",
+        "requests": 88,
+        "prompt_tokens": 1506596,
+        "completion_tokens": 18529,
+        "total_tokens": 1525125,
+        "measured": 0.2371068
+      },
+      {
+        "label": "harness",
+        "requests": 76,
+        "prompt_tokens": 1290694,
+        "completion_tokens": 18593,
+        "total_tokens": 1309287,
+        "measured": 0.2047599
+      },
+      {
+        "label": "memory_harness",
+        "requests": 92,
+        "prompt_tokens": 777588,
+        "completion_tokens": 22840,
+        "total_tokens": 800428,
+        "measured": 0.1303422
+      }
+    ]
+  }
+}

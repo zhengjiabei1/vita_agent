@@ -8,7 +8,11 @@
 
 P0 修正后又用新增额度跑了 1 个 dev 用户 × 2 子任务 × 三臂：仍全部 **0.0**。随后第二轮加入 `memory_harness` 并修正支付/设施槽，仍 **0.0**。复核日志后确认：v4 baseline 与 v5 的外卖子任务实际选到目标商品（地址正确、25 分钟、非方便面、已支付），但命令传了 `--max-steps 20`，官方 `evaluator.py` 对 `MAX_STEPS` **直接返回 0、不调用 judge**；v4 harness/memory_harness 的 0 分则是真实未满足 rubric。完整证据见 [diagnosis.md](../reports/2026-10-27-go-dev-p0-smoke/diagnosis.md)。
 
-代码已修复：`build_plan` 拒绝 `max_steps < 50`（官方 README 使用 50），并在 BLOCK 时给出已观察候选。两轮 Go 实验累计 **362/400 请求**，估算约 **0.7417 USD**，剩余 24。剩余额度不足以跑完任何 50 步轨迹；需要新额度并新建计划。免费额度阻塞记录见 [reports/2026-10-27-provider-quota](../reports/2026-10-27-provider-quota/)。
+代码已修复：`build_plan` 拒绝 `max_steps < 50`（官方 README 使用 50），并在 BLOCK 时给出已观察候选。两轮 Go 实验累计 **362/400 请求**，估算约 **0.7417 USD**，剩余 24。
+
+第三轮（新授权 300 请求）在 50 步下跑同一 dev 用户、2 子任务、每臂 1 trial，分三个代码状态：v6 = 0.0/0.0/**0.5**，v7 全 0.0，v8 = **0.5**/0.0/0.0。拿到 1.0 的两单都是目标商品 `P00083 清汤面`、地址正确、`shipping_time=25.0`、非方便面、已支付；但 baseline 同样拿到 0.5，不能归因于 memory_harness，而且 n=1、代码不同，不是受控对比。第三轮 ledger **256/300 请求**，估算 **0.5722089 USD**，剩余 44；三轮累计 **618 请求**、约 **1.3139 USD**。详见 [reports/2026-10-27-go-dev-50step](../reports/2026-10-27-go-dev-50step/)。
+
+后续新增修复：酒店“浴缸”改为房间级属性；系统提示主动列出候选；候选只有在每个硬约束都有可观察证据时才声称满足（v8 的旧提示曾把未知配送时间写成满足，导致 26 分钟订单）。下一步必须固定源码、用多 trial 估计波动，再扩用户；免费额度阻塞记录见 [reports/2026-10-27-provider-quota](../reports/2026-10-27-provider-quota/)。
 
 默认比较 full-context baseline、full-context + harness、structured memory、full-context + frozen skills、structured memory + harness + frozen skills。结构化记忆的当前轮提取属于记忆模块的处理；baseline 保留官方 full-context 记忆。技能单独收益只用 `skills - baseline`，不能用 `full - baseline` 代替。
 

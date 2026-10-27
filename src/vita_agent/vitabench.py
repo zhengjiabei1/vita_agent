@@ -154,6 +154,10 @@ class StructuredPreferenceMemory(_BaseMemory):
 
 _ID = r"[A-Za-z0-9_-]+"
 _NUMBER = r"(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?"
+# Hotel tags describe the property (parking, chain, economy), while a bathtub is
+# a room attribute: upstream lists hotels whose tag says 浴缸 but whose specific
+# rooms are still "no bathtub". Trust the room type for room-scoped features.
+_ROOM_SCOPED_FEATURES = frozenset({"bathtub"})
 
 
 class ObservedFacts:
@@ -231,7 +235,8 @@ class ObservedFacts:
             for match in re.finditer(room_pattern, content):
                 room_type, date, price, quantity, room_id = match.groups()
                 if math.isfinite(float(price)) and math.isfinite(float(quantity)):
-                    room_features = sorted(set(features) | set(normalize_hotel_features([room_type])))
+                    room_features = sorted((set(features) - _ROOM_SCOPED_FEATURES)
+                                           | set(normalize_hotel_features([room_type])))
                     facts = {
                         "total_price": float(price), "available": float(quantity) > 0,
                         "date": date, "room_type": room_type,
@@ -338,31 +343,41 @@ def make_guarded_agent_class():
             return [order for _, order in self._unpaid_order_items()]
 
         def _candidate_hint(self, tool, preferences):
-            """List already observed candidates that pass the hard preference checks.
+            """List already observed candidates whose evidence passes the hard checks.
 
             Built only from read-tool replies, so it cannot introduce values the
-            agent has not seen. The hint is advisory text, never a bypass: the
-            next draft still has to pass the same checks.
+            agent has not seen. A candidate is listed only when every applicable
+            hard preference has an observed value; unknown evidence is never
+            described as satisfying a constraint. The hint is advisory text, never
+            a bypass: the next draft still passes the same checks.
             """
             if not preferences or tool not in ("create_hotel_order", "create_delivery_order"):
                 return ""
+            aliases = {"budget": "total_price", "max_budget": "total_price",
+                       "allergy": "allergens", "allergies": "allergens"}
+
+            def verdict(facts, arguments, applicable):
+                if any(aliases.get(item.slot, item.slot) not in facts for item in applicable):
+                    return "unknown"
+                checked = self.checker.check(Action(tool, arguments, "candidate"), applicable, facts)
+                return "no" if any(v.code == "preference_conflict" for v in checked) else "ok"
+
             acceptable: list[str] = []
-
-            def conflicts(facts, arguments):
-                checked = self.checker.check(Action(tool, arguments, "candidate"), preferences, facts)
-                return [v for v in checked if v.code == "preference_conflict"]
-
             if tool == "create_hotel_order":
                 for (hotel_id, room_id), facts in self.observed_facts.rooms.items():
                     if not facts.get("available"):
                         continue
-                    if not conflicts(facts, {"hotel_id": hotel_id, "room_id": room_id}):
+                    if verdict(facts, {"hotel_id": hotel_id, "room_id": room_id}, preferences) == "ok":
                         acceptable.append(f"{facts.get('hotel_name')} / {facts.get('room_type')} / "
                                           f"{facts.get('date')} / {facts.get('total_price')}元")
                 if acceptable:
-                    return ("Observed rooms that satisfy every known hard constraint: "
+                    return ("Observed rooms whose evidence satisfies every hard constraint: "
                             + "; ".join(acceptable[:5]) + ". Book one of these observed rooms.")
-                for hotel_id, hotel in self.observed_facts.hotels.items():
+                inspected = {hotel_id for hotel_id, _ in self.observed_facts.rooms}
+                feature_preferences = [item for item in preferences if item.slot.startswith("hotel_")]
+                for hotel_id, hotel in (self.observed_facts.hotels.items() if feature_preferences else ()):
+                    if hotel_id in inspected:
+                        continue  # Its rooms were inspected and none passed; do not re-suggest it.
                     tags = hotel.get("tags") or []
                     features = normalize_hotel_features(tags)
                     facts = {"hotel_features": features, "hotel_tags": tags,
@@ -370,14 +385,16 @@ def make_guarded_agent_class():
                              "hotel_amenities": [], "_evidence_id": hotel.get("_evidence_id", "")}
                     for feature in HOTEL_FEATURE_TOKENS:
                         facts[f"hotel_feature.{feature}"] = feature in features
-                    if not conflicts(facts, {"hotel_id": hotel_id, "room_id": "unobserved"}):
+                    if verdict(facts, {"hotel_id": hotel_id, "room_id": "unobserved"},
+                               feature_preferences) == "ok":
                         acceptable.append(f"{hotel.get('hotel_name')} ({hotel_id})")
                 if acceptable:
-                    return ("No inspected room passed yet, but these already searched hotels carry the required "
-                            "features: " + "; ".join(acceptable[:5])
+                    return ("These searched hotels' tags carry the required features: "
+                            + "; ".join(acceptable[:5])
                             + ". Inspect one with get_ota_hotel_info and book an observed room.")
-                return "No observed hotel candidate satisfies all hard constraints; search more or ask which constraint to relax."
+                return "None of the observed hotel candidates satisfies all hard constraints; search more or ask which constraint to relax."
 
+            unknown = 0
             for product_id, product in self.observed_facts.products.items():
                 if product.get("quantity", 0) < 1:
                     continue
@@ -392,13 +409,20 @@ def make_guarded_agent_class():
                     facts["delivery_minutes"] = product["delivery_minutes"]
                 arguments = {"product_ids": [product_id], "product_cnts": [1],
                              "store_id": product.get("store_id")}
-                if not conflicts(facts, arguments):
+                state = verdict(facts, arguments, preferences)
+                if state == "ok":
                     minutes = facts.get("delivery_minutes")
                     acceptable.append(f"{product.get('product_name')} @ {facts.get('store_name')}"
                                       f"{'' if minutes is None else f' / {minutes}分钟'} / {product.get('price')}元")
+                elif state == "unknown":
+                    unknown += 1
             if acceptable:
-                return "Observed items that satisfy every known hard constraint: " + "; ".join(acceptable[:5]) + "."
-            return "No observed delivery item satisfies all hard constraints; inspect other stores or ask which constraint to relax."
+                return ("Observed items whose evidence satisfies every hard constraint: "
+                        + "; ".join(acceptable[:5]) + ".")
+            if unknown:
+                return ("No observed delivery item has evidence for every hard constraint "
+                        f"({unknown} lack a delivery-time or other value); verify before ordering.")
+            return "None of the observed delivery items satisfies all hard constraints; inspect other stores or ask which constraint to relax."
 
         @staticmethod
         def _payment_authorized(text):
@@ -430,7 +454,32 @@ def make_guarded_agent_class():
                 prompt += ("\n\nBefore claiming completion, explicitly state the chosen item/room, price, "
                            "address or date, delivery/check-in time, and how each known hard constraint is satisfied. "
                            "Cite the observed values; do not guess missing fields.")
+                candidates = self._runtime_candidates()
+                if candidates:
+                    prompt += ("\n\nRuntime candidates computed from earlier read-tool replies (never invent values): "
+                               + candidates)
             return prompt
+
+        def _runtime_candidates(self):
+            """Expose already observed candidates that satisfy the hard constraints.
+
+            Only a hint: every write still passes the same pre-execution checks.
+            Without it, agents tend to declare a hard constraint unsatisfiable
+            after inspecting one or two options and never revisit the rest.
+            """
+            tool = {"ota": "create_hotel_order", "delivery": "create_delivery_order"}.get(self._domain)
+            if self._domain not in ("ota", "delivery"):
+                return ""
+            if isinstance(self.memory, StructuredPreferenceMemory):
+                preferences = self.memory.store.active(self.memory.user_id,
+                                                       domain=self._domain, strength="hard")
+            else:
+                preferences = self._current_constraints.active("current-user",
+                                                               domain=self._domain, strength="hard")
+            if not preferences:
+                return ""
+            hint = self._candidate_hint(tool, preferences)
+            return "" if hint.startswith("None of the observed") else hint
 
         def _configure_checker(self):
             specs = get_official_specs()

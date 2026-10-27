@@ -201,6 +201,29 @@ def test_guard_prompt_requires_explicit_constraint_evidence(monkeypatch):
     memory.close()
 
 
+def test_guard_prompt_surfaces_observed_candidates_meeting_hard_constraints(monkeypatch):
+    pytest.importorskip("vita.environment.tool")
+    from vita.environment.tool import as_tool
+    from vita.environment.toolkit import is_tool, ToolType
+    from vita_agent.models import Evidence
+
+    @is_tool(ToolType.WRITE)
+    def create_hotel_order(hotel_id: str, room_id: str, user_id: str) -> str:
+        raise AssertionError("Guard must not execute tools")
+
+    agent, memory, _ = _upstream_agent(monkeypatch, [])
+    agent.update_tools([as_tool(create_hotel_order)])
+    memory.store.remember(Evidence("e1", "u1", "房间要带浴缸", 1), domain="ota",
+                          slot="hotel_feature.bathtub", value=True, strength="hard", operator="eq")
+    search = ("Hotel(hotel_id=H1, hotel_name=目标酒店, score=4.4, star_rating=2, "
+              "location=address='重庆市', longitude=106.4 latitude=29.56, "
+              "tags=['经济型', '连锁酒店', 'wifi', '停车场', '浴缸'])")
+    agent.observed_facts.observe("hotel_search_recommand", search, "tool-1")
+    prompt = agent.system_prompt
+    assert "Runtime candidates" in prompt and "目标酒店" in prompt
+    memory.close()
+
+
 def test_blocked_hotel_write_hint_lists_only_searched_hotels_meeting_hard_features(monkeypatch):
     from vita_agent.models import Preference
     agent, memory, _ = _upstream_agent(monkeypatch, [])
@@ -232,6 +255,22 @@ def test_blocked_delivery_write_hint_lists_only_items_meeting_delivery_limit(mon
                               "lte", "e1", "25分钟以内", 2)]
     hint = agent._candidate_hint("create_delivery_order", preferences)
     assert "快面" in hint and "慢面" not in hint
+    memory.close()
+
+
+def test_delivery_hint_never_claims_unknown_delivery_time_is_satisfied(monkeypatch):
+    from vita_agent.models import Preference
+    agent, memory, _ = _upstream_agent(monkeypatch, [])
+    content = (
+        "Store(name=测试店, store_id=S1, score=4.5, location=addr, tags=['面食']), products="
+        "StoreProduct(store_name=测试店, store_id=S1, product_name=酸辣粉, product_id=P1, "
+        "attributes=酸辣, quantity=10, price=16.0, tags=['粉类', '酸辣'])")
+    agent.observed_facts.observe("get_delivery_store_info", content, "tool-1")
+    preferences = [Preference("p1", "u1", "delivery", "delivery_minutes", 25.0, "hard",
+                              "lte", "e1", "25分钟以内", 1)]
+    hint = agent._candidate_hint("create_delivery_order", preferences)
+    assert "酸辣粉" not in hint
+    assert "evidence" in hint
     memory.close()
 
 
@@ -280,6 +319,43 @@ def test_hard_hotel_feature_preference_blocks_missing_bathtub():
         Action("create_hotel_order", {"hotel_id": "h1", "room_id": "r1", "user_id": "u1"}, "id"),
         [pref], resolved)
     assert {v.code for v in violations} == {"preference_conflict"}
+
+
+def test_room_bathtub_comes_from_room_type_not_the_hotel_tag():
+    facts = ObservedFacts()
+    hotel = HOTEL.replace("hotel_name=Hotel,", "hotel_name=速8酒店,").replace(
+        "tags=[]", "tags=['经济型', '连锁酒店', '停车场', '浴缸']")
+    facts.observe("get_ota_hotel_info", hotel, "hotel-detail")
+    plain = facts.resolve(Action("create_hotel_order", {"hotel_id": "h1", "room_id": "r1"}, "id"))
+    assert plain["hotel_feature.bathtub"] is False
+    assert plain["hotel_feature.parking"] is True
+    tub = ObservedFacts()
+    tub.observe("get_ota_hotel_info", hotel.replace("room_type=double", "room_type=经济大床房(带浴缸)"), "room-detail")
+    room = tub.resolve(Action("create_hotel_order", {"hotel_id": "h1", "room_id": "r1"}, "id"))
+    assert room["hotel_feature.bathtub"] is True
+
+
+def test_hotel_hint_does_not_resuggest_an_inspected_hotel_without_a_matching_room(monkeypatch):
+    from vita_agent.models import Preference
+    agent, memory, _ = _upstream_agent(monkeypatch, [])
+    search = (
+        "Hotel(hotel_id=H1, hotel_name=未检查酒店, score=4.4, star_rating=2, "
+        "location=address='重庆市', longitude=106.4 latitude=29.56, "
+        "tags=['经济型', '连锁酒店', 'wifi', '停车场', '浴缸'])\n"
+        "Hotel(hotel_id=H2, hotel_name=已检查酒店, score=4.6, star_rating=2, "
+        "location=address='重庆市', longitude=106.5 latitude=29.5, "
+        "tags=['经济型', '连锁酒店', 'wifi', '停车场', '浴缸'])")
+    agent.observed_facts.observe("hotel_search_recommand", search, "tool-1")
+    inspected = (
+        "Hotel Info:\nHotel(hotel_id=H2, hotel_name=已检查酒店, score=4.6, star_rating=2, "
+        "location=x, tags=['经济型', '连锁酒店', 'wifi', '停车场', '浴缸'], "
+        "products=HotelProduct(room_type=经济大床房, date=2026-07-03, price=138.0, quantity=2, room_id=r2))")
+    agent.observed_facts.observe("get_ota_hotel_info", inspected, "tool-2")
+    preferences = [Preference("p1", "u1", "ota", "hotel_feature.bathtub", True, "hard",
+                              "eq", "e1", "房间要带浴缸", 1)]
+    hint = agent._candidate_hint("create_hotel_order", preferences)
+    assert "未检查酒店" in hint and "已检查酒店" not in hint
+    memory.close()
 
 
 def test_completion_claim_is_blocked_while_an_order_is_unpaid(monkeypatch):
