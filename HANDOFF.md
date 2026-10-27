@@ -60,10 +60,10 @@ OpenCode 免费模型 `deepseek-v4.1-flash-free` 的最小预检返回 HTTP 429 
 优先解决方差，而不是继续加机制：
 
 1. 固定源码，3 臂 × 3 trials × 若干 dev 用户，先估轨迹波动；n=1 的任何差值都不可用。
-2. 把 guard 的“完成前说明”和候选列表做成独立开关，做隔离消融，避免把提示词效应当成约束检查收益。
+2. 用已加入的隔离开关做提示词消融：`guards_plain`（仅检查）与 `memory_guards_plain`（记忆 + 仅检查），对应环境变量 `VITA_COMPLETION_EVIDENCE`/`VITA_CANDIDATE_HINTS`。开关只影响提示词，不改变检查逻辑；已有单测，尚未在真实模型上运行。
 3. skills/full 需要真实冻结技能库；测试集只在最后、冻结后运行。
 
-按实测每次请求约 0.0024 USD，3 臂 × 3 trials × 11 用户约需 2,800 请求（约 6.7 USD）。
+按实测每次请求约 0.0024 USD。建议下一轮：baseline / guards_plain / memory_guards_plain × 11 用户 × 2 trials ≈ 1,850 请求（约 4.4 USD）；如果只做 5 用户 × 3 trials，约 1,260 请求（约 3 USD）。
 
 ## 已完成的实现
 
@@ -145,7 +145,7 @@ Qwen Code 官方文档已注明 OAuth 免费套餐 2026-04-15 停用，不依赖
 
 先读 HANDOFF.md、README.md、docs/verification.md、docs/experiments.md，以及 reports/2026-10-26-train-prefix2/、reports/2026-10-27-zero-score-diagnosis/、reports/2026-10-27-provider-quota/。检查代码和证据，不要从零重写。
 
-简历中的 0.440→0.570、8.6%、0.38→0.48、4.6pp 都是猜测，禁止作为真实结果。当前293项测试通过；已完成新 Go 模型上1个训练用户、2子任务、baseline/harness/memory各1trial（三臂0分），1个dev用户两轮20步smoke（均0分），1个dev用户三轮50步smoke（最高0.5），以及11个dev用户×2子任务×3臂×1trial的完整配对（baseline 0.409、harness 0.273、memory_harness 0.182；配对差值均跨0）。都不是测试集，也未完成 skills/full 和完整消融。四轮累计1546请求、估算约3.5128 USD，剩余72。已确认20步零分是过早终止惩罚（官方直接返回0、不调用judge），现已强制 `max_steps >= 50`。下一步固定源码，用多trial dev对比估计波动，并把提示词开关与约束检查分开消融，再跑 skills/full 和保留测试。
+简历中的 0.440→0.570、8.6%、0.38→0.48、4.6pp 都是猜测，禁止作为真实结果。当前296项测试通过；已完成新 Go 模型上1个训练用户、2子任务、baseline/harness/memory各1trial（三臂0分），1个dev用户两轮20步smoke（均0分），1个dev用户三轮50步smoke（最高0.5），以及11个dev用户×2子任务×3臂×1trial的完整配对（baseline 0.409、harness 0.273、memory_harness 0.182；配对差值均跨0）。都不是测试集，也未完成 skills/full 和完整消融。四轮累计1546请求、估算约3.5128 USD，剩余72。已确认20步零分是过早终止惩罚（官方直接返回0、不调用judge），现已强制 `max_steps >= 50`。下一步固定源码，用多trial dev对比估计波动，并把提示词开关与约束检查分开消融，再跑 skills/full 和保留测试。
 
 我要换平台/模型继续，优先免费API；旧DeepSeek付费调用已停止。先完成本地工作，再通过环境密钥设置获取实际需要的凭据，不能让我在聊天里贴Key，也不能未经授权产生费用。
 

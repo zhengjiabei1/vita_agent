@@ -50,6 +50,14 @@ def test_user_split_is_deterministic_and_does_not_split_a_user(inputs):
     assert all(not x & y for i, x in enumerate(partitions) for y in partitions[i + 1:])
 
 
+def test_plain_guard_variants_disable_prompt_nudges(inputs):
+    plan = build_plan(**dict(inputs, variants=["harness", "guards_plain"], memory_extraction="rules"))
+    current, plain = (run["environment"] for run in plan["runs"])
+    assert current["VITA_COMPLETION_EVIDENCE"] == "1" and current["VITA_CANDIDATE_HINTS"] == "1"
+    assert plain["VITA_COMPLETION_EVIDENCE"] == "0" and plain["VITA_CANDIDATE_HINTS"] == "0"
+    assert plain["VITA_ENABLE_GUARDS"] == "1"
+
+
 def test_explicit_user_limit_overrides_the_smoke_cohort_cap(inputs):
     plan = build_plan(**dict(inputs, user_limit=2, memory_extraction="rules"))
     assert plan["phase"] == "smoke" and len(plan["selected_user_ids"]) == 2

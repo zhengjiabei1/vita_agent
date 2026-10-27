@@ -34,6 +34,12 @@ VARIANTS = {
     "full": {"memory": "structured", "guards": True, "skills": True},
     # Diagnostic combination without a skill bank: structured memory + guards.
     "memory_harness": {"memory": "structured", "guards": True, "skills": False},
+    # Same checks without the prompt nudges, to separate constraint checking
+    # from wording effects (completion summary and candidate lists).
+    "guards_plain": {"memory": "full_context", "guards": True, "skills": False,
+                     "completion_evidence": False, "candidate_hints": False},
+    "memory_guards_plain": {"memory": "structured", "guards": True, "skills": False,
+                            "completion_evidence": False, "candidate_hints": False},
 }
 _ENV = re.compile(r"^\$\{([A-Za-z_][A-Za-z0-9_]*)\}$")
 
@@ -264,6 +270,8 @@ def build_plan(dataset: str | Path, output: str | Path, *, model_config: str | P
         plans.append({"variant": variant, "upstream_arguments": args, "result": str(result),
                       "environment": {"VITA_MODEL_CONFIG_PATH": config["path"],
                                       "VITA_ENABLE_GUARDS": "1" if spec["guards"] else "0",
+                                      "VITA_COMPLETION_EVIDENCE": "1" if spec.get("completion_evidence", True) else "0",
+                                      "VITA_CANDIDATE_HINTS": "1" if spec.get("candidate_hints", True) else "0",
                                       "VITA_MEMORY_EXTRACTION": memory_extraction,
                                       "VITA_SKILL_BANK": frozen["path"] if spec["skills"] else ""}})
     from .upstream_fixes import patch_info

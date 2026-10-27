@@ -585,3 +585,19 @@ def test_room_date_is_checked_against_simulated_time(monkeypatch):
     assert not result.tool_calls
     assert any(v["code"] == "invalid_dates" for v in agent.guard_audit[0]["violations"])
     memory.close()
+
+
+def test_prompt_nudges_are_independent_switches(monkeypatch):
+    monkeypatch.setenv("VITA_COMPLETION_EVIDENCE", "0")
+    monkeypatch.setenv("VITA_CANDIDATE_HINTS", "0")
+    agent, memory, _ = _upstream_agent(monkeypatch, [])
+    prompt = agent.system_prompt
+    assert "Before claiming completion" not in prompt
+    assert "Runtime candidates" not in prompt
+    memory.close()
+
+
+def test_invalid_prompt_switch_is_rejected(monkeypatch):
+    monkeypatch.setenv("VITA_CANDIDATE_HINTS", "yes")
+    with pytest.raises(ValueError, match="VITA_CANDIDATE_HINTS"):
+        _upstream_agent(monkeypatch, [])

@@ -323,6 +323,8 @@ def make_guarded_agent_class():
             if not isinstance(enable_guards, bool):
                 raise ValueError("enable_guards must be boolean")
             self.enable_guards = enable_guards
+            self.completion_evidence = self._flag("VITA_COMPLETION_EVIDENCE")
+            self.candidate_hints = self._flag("VITA_CANDIDATE_HINTS")
             from .skills import FrozenSkillBank
             skill_bank = skill_bank or os.environ.get("VITA_SKILL_BANK")
             self._frozen_skills = (skill_bank if isinstance(skill_bank, FrozenSkillBank)
@@ -341,6 +343,13 @@ def make_guarded_agent_class():
 
         def _unpaid_orders(self):
             return [order for _, order in self._unpaid_order_items()]
+
+        @staticmethod
+        def _flag(name):
+            value = os.environ.get(name, "1")
+            if value not in ("0", "1"):
+                raise ValueError(f"{name} must be 0 or 1")
+            return value == "1"
 
         def _candidate_hint(self, tool, preferences):
             """List already observed candidates whose evidence passes the hard checks.
@@ -451,13 +460,15 @@ def make_guarded_agent_class():
                 prompt += ("\n\nRuntime state: there are unpaid orders in this subtask. "
                            "Do not claim the task is complete; pay them or ask the user before finishing.")
             if self.enable_guards:
-                prompt += ("\n\nBefore claiming completion, explicitly state the chosen item/room, price, "
-                           "address or date, delivery/check-in time, and how each known hard constraint is satisfied. "
-                           "Cite the observed values; do not guess missing fields.")
-                candidates = self._runtime_candidates()
-                if candidates:
-                    prompt += ("\n\nRuntime candidates computed from earlier read-tool replies (never invent values): "
-                               + candidates)
+                if self.completion_evidence:
+                    prompt += ("\n\nBefore claiming completion, explicitly state the chosen item/room, price, "
+                               "address or date, delivery/check-in time, and how each known hard constraint is satisfied. "
+                               "Cite the observed values; do not guess missing fields.")
+                if self.candidate_hints:
+                    candidates = self._runtime_candidates()
+                    if candidates:
+                        prompt += ("\n\nRuntime candidates computed from earlier read-tool replies (never invent values): "
+                                   + candidates)
             return prompt
 
         def _runtime_candidates(self):
@@ -602,7 +613,7 @@ def make_guarded_agent_class():
                         self._current_constraints.active("current-user", domain=spec.domain if spec else None, strength="hard"))
                     checked = self.checker.check(action, [] if ignores_purchase_preferences(call.name) else preferences, facts)
                     violations.extend(checked)
-                    if any(v.code == "preference_conflict" for v in checked):
+                    if self.candidate_hints and any(v.code == "preference_conflict" for v in checked):
                         hint = self._candidate_hint(call.name, preferences)
                         if hint:
                             hints.append(hint)

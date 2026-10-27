@@ -1,6 +1,6 @@
 # 验证记录与真实实验边界
 
-2026-10-27 在新环境重新运行完整测试：`python -m pytest -q`，**293 passed，无 skip**（已安装固定官方 VitaBench 包）。测试中的模型生成使用替身，不产生推理费用，也不构成 benchmark 成绩。
+2026-10-27 在新环境重新运行完整测试：`python -m pytest -q`，**296 passed，无 skip**（已安装固定官方 VitaBench 包）。测试中的模型生成使用替身，不产生推理费用，也不构成 benchmark 成绩。
 
 本次交接还重新通过以下本地检查：
 

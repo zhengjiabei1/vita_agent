@@ -18,6 +18,8 @@ P0 修正后又用新增额度跑了 1 个 dev 用户 × 2 子任务 × 三臂�
 
 默认比较 full-context baseline、full-context + harness、structured memory、full-context + frozen skills、structured memory + harness + frozen skills。结构化记忆的当前轮提取属于记忆模块的处理；baseline 保留官方 full-context 记忆。技能单独收益只用 `skills - baseline`，不能用 `full - baseline` 代替。
 
+**提示词与约束检查分离：** `harness` 同时包含执行前检查和两种提示词（完成前逐条说明、系统提示候选列表）。为区分“检查收益”和“措辞效应”，新增 `guards_plain`（仅检查、无提示）与 `memory_guards_plain`（结构化记忆 + 仅检查）。开关是计划环境变量 `VITA_COMPLETION_EVIDENCE` 和 `VITA_CANDIDATE_HINTS`（`1`/`0`，默认 `1`），只影响提示词，不改变任何检查逻辑。
+
 ## 数据与划分
 
 官方 `personalization/tasks.json` 按真实 user_id 分组，固定 seed=42 划分 train/dev/test。同一用户若有多个 task，所有 task 都进入同一分区。manifest 保存任务文件 SHA-256、用户和任务 ID、各任务子任务数；不导出 instruction、rubric 或隐藏偏好到 Agent 额外上下文。
