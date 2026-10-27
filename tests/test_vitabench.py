@@ -201,6 +201,40 @@ def test_guard_prompt_requires_explicit_constraint_evidence(monkeypatch):
     memory.close()
 
 
+def test_blocked_hotel_write_hint_lists_only_searched_hotels_meeting_hard_features(monkeypatch):
+    from vita_agent.models import Preference
+    agent, memory, _ = _upstream_agent(monkeypatch, [])
+    good = ("Hotel(hotel_id=H1, hotel_name=目标酒店, score=4.4, star_rating=2, "
+            "location=address='重庆市', longitude=106.4 latitude=29.56, "
+            "tags=['经济型', '连锁酒店', 'wifi', '停车场', '浴缸'])")
+    bad = ("Hotel(hotel_id=H2, hotel_name=无停车酒店, score=4.5, star_rating=2, "
+           "location=address='重庆市', longitude=106.5 latitude=29.5, "
+           "tags=['经济型', '连锁酒店', 'wifi', '浴缸'])")
+    agent.observed_facts.observe("hotel_search_recommand", good + "\n" + bad, "tool-1")
+    preferences = [Preference("p1", "u1", "ota", "hotel_feature.parking", True, "hard",
+                              "eq", "e1", "带停车场", 1)]
+    hint = agent._candidate_hint("create_hotel_order", preferences)
+    assert "目标酒店" in hint and "无停车酒店" not in hint
+    memory.close()
+
+
+def test_blocked_delivery_write_hint_lists_only_items_meeting_delivery_limit(monkeypatch):
+    from vita_agent.models import Preference
+    agent, memory, _ = _upstream_agent(monkeypatch, [])
+    content = (
+        "Store(name=测试店, store_id=S1, score=4.5, location=addr, tags=['面食']), products="
+        "StoreProduct(store_name=测试店, store_id=S1, product_name=快面, product_id=P1, "
+        "attributes=清汤底, 配送时间约20分钟, quantity=10, price=16.0, tags=['面食', '清汤'])\n"
+        "StoreProduct(store_name=测试店, store_id=S1, product_name=慢面, product_id=P2, "
+        "attributes=清汤底, 配送时间约30分钟, quantity=10, price=18.0, tags=['面食', '清汤'])")
+    agent.observed_facts.observe("get_delivery_store_info", content, "tool-2")
+    preferences = [Preference("p1", "u1", "delivery", "delivery_minutes", 25.0, "hard",
+                              "lte", "e1", "25分钟以内", 2)]
+    hint = agent._candidate_hint("create_delivery_order", preferences)
+    assert "快面" in hint and "慢面" not in hint
+    memory.close()
+
+
 def test_new_unpaid_order_is_paid_by_the_guard_before_the_next_llm_turn(monkeypatch):
     pytest.importorskip("vita.data_model.message")
     from vita.data_model.message import ToolMessage
@@ -346,6 +380,33 @@ def test_actual_guarded_subclass_regenerates_and_accumulates_cost(monkeypatch):
     assert len(calls) == 2
     assert agent.guard_audit[0]["violations"][0]["code"] == "budget_exceeded"
     assert all(not getattr(message, "tool_calls", None) or message.tool_calls[0].id != "bad" for message in state.messages)
+    memory.close()
+
+
+def test_blocked_write_feedback_lists_observed_candidates(monkeypatch):
+    pytest.importorskip("vita.data_model.message")
+    from vita.data_model.message import AssistantMessage, MultiToolMessage, ToolCall, ToolMessage
+    from vita_agent.models import Evidence
+    store = (
+        "Store(name=测试店, store_id=s1, score=4.5, location=addr, tags=['面食']), products="
+        "StoreProduct(store_name=测试店, store_id=s1, product_name=慢面, product_id=p1, "
+        "attributes=清汤底, 配送时间约30分钟, quantity=10, price=12.5, tags=['面食'])\n"
+        "StoreProduct(store_name=测试店, store_id=s1, product_name=快面, product_id=p2, "
+        "attributes=清汤底, 配送时间约20分钟, quantity=10, price=12.5, tags=['面食'])")
+    args = {"user_id": "u1", "store_id": "s1", "product_ids": ["p1"], "product_cnts": [1],
+            "address": "test address", "dispatch_time": "2026-07-01 13:00:00"}
+    drafts = [AssistantMessage(role="assistant", tool_calls=[ToolCall(id="slow", name="create_delivery_order", arguments=args)]),
+              AssistantMessage(role="assistant", content="换一家")]
+    agent, memory, calls = _upstream_agent(monkeypatch, drafts)
+    memory.store.remember(Evidence("e1", "u1", "配送25分钟以内", 1), domain="delivery",
+                          slot="delivery_minutes", value=25.0, strength="hard", operator="lte")
+    observation = MultiToolMessage(role="tool", tool_messages=[
+        ToolMessage(role="tool", id="read-store", name="get_delivery_store_info", content=store)])
+    result, _ = agent.generate_next_message(observation, agent.get_init_state())
+    assert result.content == "换一家"
+    assert any(v["code"] == "preference_conflict" for v in agent.guard_audit[0]["violations"])
+    feedback = calls[1]["messages"][-1].content
+    assert "快面" in feedback and "慢面" not in feedback
     memory.close()
 
 

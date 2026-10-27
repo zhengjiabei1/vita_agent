@@ -43,10 +43,11 @@
 
 ## P0 修正后的观察
 
-- CGL fail-open 后，baseline/harness 没有再因为“未知事实”反复阻塞到 `max_steps`；三臂都正常 `agent_stop`/`user_stop`。
-- baseline/harness 选到带浴缸房型，说明上下文中的历史偏好能被模型使用；但支付仍未完成。
-- 支付失败的原因是用户模拟器把“支付吧 + 支付成功 + ###STOP###”合并在一条消息里，agent 没有机会在 STOP 前调用支付工具。仅靠“用户授权后自动支付”太晚；后续代码已改为**观察到 create 订单后立即由 guard 支付**，但本轮剩余 14 请求不足以验证。
-- memory 臂未选到带浴缸，说明 `hotel_features` 单槽会把“经济型/连锁/浴缸/停车”互相 supersede。后续代码已拆成 `hotel_feature.economy` 等独立槽位，也未在本轮验证。
+- CGL fail-open 后，三臂没有因为“未知事实”无限阻塞；本轮都正常 `agent_stop`/`user_stop`。
+- v3 baseline 酒店未支付；v3 harness 酒店为 `精选大床房`（无浴缸）；v3 memory_harness 酒店为 `经济大床房(带浴缸)`，但所选酒店无停车场。三者都不满足酒店 rubric。
+- 外卖：v3 baseline `清汤牛肉拉面` 26 分钟；v3 harness `汤达人清汤面`（标签含方便面）25 分钟；v3 memory_harness `清汤排骨面` 26 分钟。都不满足“25 分钟内 + 非方便面”。
+- 支付失败的原因是用户模拟器把“支付吧 + 支付成功 + ###STOP###”合并在一条消息里，agent 没有机会在 STOP 前调用支付工具。仅靠“用户授权后自动支付”太晚；后续代码已改为**观察到 create 订单后立即由 guard 支付**。
+- memory 臂酒店设施曾用单槽 `hotel_features`，会把“经济型/连锁/浴缸/停车”互相 supersede；后续代码已拆成 `hotel_feature.economy` 等独立槽位。
 
 ## 第二轮（round2.json）
 
@@ -56,7 +57,9 @@
 - v4 baseline 的外卖最终为“清汤面”、`shipping_time=25.0`、地址正确、非方便面、已支付，但 subtask 1 仍为 0.0。
 - v5 `memory_harness`（加入软/硬槽和防覆盖修正）在酒店阶段 `max_steps`，没有酒店订单；外卖选中**精确目标商品** `清汤面`（P00083），地址正确、`shipping_time=25.0`、非方便面、已支付，但 subtask 1 仍为 0.0。
 
-这组证据说明：**至少有一个子任务的最终状态看起来满足所有 rubric，但 trajectory judge 仍给 0 分**。下一步不应继续盲目加约束，而应先检查 trajectory judge 是否看到了足够证据（agent 最终回复是否逐条说明商品、地址、时间、非方便面），并可用 outcome evaluator 做离线诊断。另一种失败是硬设施约束无候选反馈导致 `max_steps`。
+这组“状态满足却 0 分”已复核并更正：v4 baseline 的 subtask 1 与 v5 的两个子任务都因 `MAX_STEPS` 终止，官方 `evaluator.py` 对过早终止**直接返回 0、不调用 judge**；v4 harness/memory_harness 的 0 分则是真实未满足 rubric（方便面、26 分钟、房型/酒店无浴缸或无停车场）。根因是本轮命令传了 `--max-steps 20`，而上游 README 使用 50。完整证据见 [diagnosis.md](diagnosis.md)。
+
+代码已修复（未调用模型）：`build_plan` 拒绝 `max_steps < 50`；BLOCK 时从已观察候选里给出满足硬约束的酒店/商品，避免反复追问耗尽步数。
 
 第二轮 ledger：176/200 请求，输入 2,379,714、输出 35,668，估算 0.37836 USD，剩余 24。两轮累计 362/400 请求，估算约 0.7417 USD。
 
@@ -65,5 +68,5 @@
 - 1 个 dev 用户、2 个子任务、1 trial；不能据此判断模块有效或无效。
 - 没有 skills/full；没有训练失败反思；没有测试集。
 - 三臂 0 分存在 floor effect，baseline 自己也是 0，无法测出模块增量。
-- “状态满足但 judge 0”不等同于评分器 bug；也可能是 agent 回复没有给 judge 明确证据，必须进一步诊断。
-- 旧计划已因后续源码变化失效；任何复跑必须新建计划。
+- 当前所有 0 分都能归因于真实 rubric 未满足或 `max_steps` 过早终止；没有评分器缺陷证据。
+- 旧计划已因后续源码变化失效；任何复跑必须新建计划，且 `max_steps >= 50`。

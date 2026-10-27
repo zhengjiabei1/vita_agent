@@ -6,7 +6,9 @@
 
 随后在新模型 `deepseek-v4.1-flash` 上完成 1 个训练用户 × 2 子任务的 baseline/harness/memory 各 1 trial，三臂均 **0.0**；共享 ledger 用 **176/200 请求**，估算 **0.30838665 USD**。真实结果、Token 和限制见 [reports/2026-10-27-go-train-prefix2](../reports/2026-10-27-go-train-prefix2/)。
 
-P0 修正后又用新增额度跑了 1 个 dev 用户 × 2 子任务 × 三臂：仍全部 **0.0**，但都正常 `agent_stop`/`user_stop`，不再 `max_steps`；baseline/harness 选到带浴缸房型但未支付，memory 外卖非方便面但 26 分钟。两轮累计 **186/200 请求**、估算 **0.36331 USD**，剩余 14。见 [reports/2026-10-27-go-dev-p0-smoke](../reports/2026-10-27-go-dev-p0-smoke/)。剩余额度不足以完成有效 skills/full 五组消融；需要新额度并新建计划。免费额度阻塞记录见 [reports/2026-10-27-provider-quota](../reports/2026-10-27-provider-quota/)。
+P0 修正后又用新增额度跑了 1 个 dev 用户 × 2 子任务 × 三臂：仍全部 **0.0**。随后第二轮加入 `memory_harness` 并修正支付/设施槽，仍 **0.0**。复核日志后确认：v4 baseline 与 v5 的外卖子任务实际选到目标商品（地址正确、25 分钟、非方便面、已支付），但命令传了 `--max-steps 20`，官方 `evaluator.py` 对 `MAX_STEPS` **直接返回 0、不调用 judge**；v4 harness/memory_harness 的 0 分则是真实未满足 rubric。完整证据见 [diagnosis.md](../reports/2026-10-27-go-dev-p0-smoke/diagnosis.md)。
+
+代码已修复：`build_plan` 拒绝 `max_steps < 50`（官方 README 使用 50），并在 BLOCK 时给出已观察候选。两轮 Go 实验累计 **362/400 请求**，估算约 **0.7417 USD**，剩余 24。剩余额度不足以跑完任何 50 步轨迹；需要新额度并新建计划。免费额度阻塞记录见 [reports/2026-10-27-provider-quota](../reports/2026-10-27-provider-quota/)。
 
 默认比较 full-context baseline、full-context + harness、structured memory、full-context + frozen skills、structured memory + harness + frozen skills。结构化记忆的当前轮提取属于记忆模块的处理；baseline 保留官方 full-context 记忆。技能单独收益只用 `skills - baseline`，不能用 `full - baseline` 代替。
 
@@ -28,11 +30,13 @@ P0 修正后又用新增额度跑了 1 个 dev 用户 × 2 子任务 × 三臂�
   --dataset /workspace/scratch/vitabench2-reference/data/vita/domains/personalization/tasks.json \
   --upstream /workspace/scratch/vitabench2-reference \
   --model-config examples/deepseek-flash.yaml --model deepseek-flash \
-  --phase smoke --variants baseline harness memory --max-steps 20 \
+  --phase smoke --variants baseline harness memory --max-steps 50 \
   --output artifacts/smoke-v1
 ```
 
 模型 YAML 必须声明该模型，设置明确的 `max_tokens`、`base_url`、安全环境变量形式的 `api_key`。付费模型必须且只能声明 `cost_1m_token_cny`（人民币）或 `cost_1m_token_dollar`（美元）的 `prompt_price` / `completion_price`；两种币种不能混用。免费模型必须声明 `billing: free` 和 `free_quota.unit`（`request` 或 `credit`），**不能**用 0 单价冒充免费，也不能同时声明 token 单价。计划只记录凭据变量名称与是否存在，不记录其值。缺少凭据允许生成计划，但禁止执行。`--memory-extraction llm|rules` 固定记忆抽取方式，默认 llm；非结构化记忆实验不使用该提取器。
+
+**步数下限：** personalization 子任务必须 `--max-steps >= 50`（官方 README 的示例值）。官方 evaluator 对 `MAX_STEPS` 终止直接返回 0 且不调用 judge；低于 50 的计划会被 `build_plan` 拒绝，因为那种 0 分不能解释为模型能力。
 
 加入 `skills` 或 `full` 时必须提供 `--skill-bank frozen.json`。加载器检查快照哈希，并要求全部来源任务都属于**本次数据划分的训练集**；演示中的手工失败技能无法通过此检查。训练期收集轨迹、开发期选择效用阈值后冻结；测试中只读加载。
 
@@ -63,7 +67,7 @@ OPENCODE_API_KEY="<environment only>" \
   --model-config examples/opencode-deepseek-free.yaml \
   --model deepseek-v4.1-flash-free \
   --phase train --user-limit 1 --variants baseline harness memory \
-  --max-steps 20 --num-trials 1 --output artifacts/free-train-prefix2-v2
+  --max-steps 50 --num-trials 1 --output artifacts/free-train-prefix2-v2
 
 # 3 次请求是本地授权上限；不是供应商每日额度
 OPENCODE_API_KEY="<environment only>" \

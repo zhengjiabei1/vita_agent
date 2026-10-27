@@ -168,24 +168,27 @@ class ObservedFacts:
     def __init__(self):
         self.products: dict[str, dict] = {}
         self.stores: dict[str, dict] = {}
+        self.hotels: dict[str, dict] = {}
         self.rooms: dict[tuple[str, str], dict] = {}
         self.orders: dict[str, dict] = {}
 
     def clear(self):
         self.products.clear()
         self.stores.clear()
+        self.hotels.clear()
         self.rooms.clear()
         self.orders.clear()
 
     def _delivery_products(self, content: str, evidence_id: str):
         pattern = rf"StoreProduct\(store_name=[^,]*, store_id=({_ID}), product_name=([^,]*), product_id=({_ID}), attributes=(.*?), quantity=({_NUMBER}), price=({_NUMBER}), tags=\[([^\]]*)\]\)"
         for match in re.finditer(pattern, content):
-            store_id, _name, product_id, attributes, quantity, price, tag_text = match.groups()
+            store_id, name, product_id, attributes, quantity, price, tag_text = match.groups()
             if not (math.isfinite(float(quantity)) and math.isfinite(float(price))):
                 continue
             minutes = re.search(r"配送时间约(\d+)分钟", attributes)
             self.products[product_id] = {
                 "store_id": store_id, "quantity": float(quantity), "price": float(price),
+                "product_name": name,
                 "delivery_minutes": int(minutes[1]) if minutes else None,
                 "product_tags": re.findall(r"'([^']*)'", tag_text),
                 "_evidence_id": evidence_id,
@@ -208,7 +211,15 @@ class ObservedFacts:
                 self._delivery_products(content, evidence_id)
         elif name == "get_delivery_product_info":
             self._delivery_products(content, evidence_id)
-        elif name == "get_ota_hotel_info":
+        elif name in ("hotel_search_recommand", "get_ota_hotel_info"):
+            # Keep every searched hotel's tags so a blocked write can point the
+            # agent at an observed hotel that satisfies the hard constraints.
+            for match in re.finditer(rf"Hotel\(hotel_id=({_ID}), hotel_name=([^,\n]+),.*?tags=\[([^\]]*)\]\)", content):
+                hotel_id, hotel_name, tag_text = match.groups()
+                self.hotels[hotel_id] = {"hotel_name": hotel_name,
+                    "tags": re.findall(r"'([^']*)'", tag_text), "_evidence_id": evidence_id}
+            if name == "hotel_search_recommand":
+                return
             header = re.match(rf"Hotel Info:\nHotel\(hotel_id=({_ID}), hotel_name=([^,\n]+),", content)
             if not header or content.count("hotel_id=") != 1:
                 return
@@ -216,8 +227,8 @@ class ObservedFacts:
             hotel_tags = re.findall(r"'([^']*)'", tag_block[1]) if tag_block else []
             amenities = ["phone_wakeup"] if any("电话叫醒" in tag for tag in hotel_tags) else []
             features = normalize_hotel_features(hotel_tags)
-            pattern = rf"HotelProduct\(room_type=([^,\n]+), date=(\d{{4}}-\d{{2}}-\d{{2}}), price=({_NUMBER}), quantity=({_NUMBER}), room_id=({_ID})\)"
-            for match in re.finditer(pattern, content):
+            room_pattern = rf"HotelProduct\(room_type=([^,\n]+), date=(\d{{4}}-\d{{2}}-\d{{2}}), price=({_NUMBER}), quantity=({_NUMBER}), room_id=({_ID})\)"
+            for match in re.finditer(room_pattern, content):
                 room_type, date, price, quantity, room_id = match.groups()
                 if math.isfinite(float(price)) and math.isfinite(float(quantity)):
                     room_features = sorted(set(features) | set(normalize_hotel_features([room_type])))
@@ -325,6 +336,69 @@ def make_guarded_agent_class():
 
         def _unpaid_orders(self):
             return [order for _, order in self._unpaid_order_items()]
+
+        def _candidate_hint(self, tool, preferences):
+            """List already observed candidates that pass the hard preference checks.
+
+            Built only from read-tool replies, so it cannot introduce values the
+            agent has not seen. The hint is advisory text, never a bypass: the
+            next draft still has to pass the same checks.
+            """
+            if not preferences or tool not in ("create_hotel_order", "create_delivery_order"):
+                return ""
+            acceptable: list[str] = []
+
+            def conflicts(facts, arguments):
+                checked = self.checker.check(Action(tool, arguments, "candidate"), preferences, facts)
+                return [v for v in checked if v.code == "preference_conflict"]
+
+            if tool == "create_hotel_order":
+                for (hotel_id, room_id), facts in self.observed_facts.rooms.items():
+                    if not facts.get("available"):
+                        continue
+                    if not conflicts(facts, {"hotel_id": hotel_id, "room_id": room_id}):
+                        acceptable.append(f"{facts.get('hotel_name')} / {facts.get('room_type')} / "
+                                          f"{facts.get('date')} / {facts.get('total_price')}元")
+                if acceptable:
+                    return ("Observed rooms that satisfy every known hard constraint: "
+                            + "; ".join(acceptable[:5]) + ". Book one of these observed rooms.")
+                for hotel_id, hotel in self.observed_facts.hotels.items():
+                    tags = hotel.get("tags") or []
+                    features = normalize_hotel_features(tags)
+                    facts = {"hotel_features": features, "hotel_tags": tags,
+                             "hotel_brand": normalize_hotel_brand(hotel.get("hotel_name", "")),
+                             "hotel_amenities": [], "_evidence_id": hotel.get("_evidence_id", "")}
+                    for feature in HOTEL_FEATURE_TOKENS:
+                        facts[f"hotel_feature.{feature}"] = feature in features
+                    if not conflicts(facts, {"hotel_id": hotel_id, "room_id": "unobserved"}):
+                        acceptable.append(f"{hotel.get('hotel_name')} ({hotel_id})")
+                if acceptable:
+                    return ("No inspected room passed yet, but these already searched hotels carry the required "
+                            "features: " + "; ".join(acceptable[:5])
+                            + ". Inspect one with get_ota_hotel_info and book an observed room.")
+                return "No observed hotel candidate satisfies all hard constraints; search more or ask which constraint to relax."
+
+            for product_id, product in self.observed_facts.products.items():
+                if product.get("quantity", 0) < 1:
+                    continue
+                store = self.observed_facts.stores.get(product.get("store_id"), {})
+                facts = {"total_price": product.get("price"), "available": True,
+                         "_evidence_id": product.get("_evidence_id", ""),
+                         "food_tags": sorted(product.get("product_tags", []))}
+                for key in ("store_name", "store_score", "store_tags", "delivery_minutes"):
+                    if store.get(key) is not None:
+                        facts[key] = store[key]
+                if product.get("delivery_minutes") is not None:
+                    facts["delivery_minutes"] = product["delivery_minutes"]
+                arguments = {"product_ids": [product_id], "product_cnts": [1],
+                             "store_id": product.get("store_id")}
+                if not conflicts(facts, arguments):
+                    minutes = facts.get("delivery_minutes")
+                    acceptable.append(f"{product.get('product_name')} @ {facts.get('store_name')}"
+                                      f"{'' if minutes is None else f' / {minutes}分钟'} / {product.get('price')}元")
+            if acceptable:
+                return "Observed items that satisfy every known hard constraint: " + "; ".join(acceptable[:5]) + "."
+            return "No observed delivery item satisfies all hard constraints; inspect other stores or ask which constraint to relax."
 
         @staticmethod
         def _payment_authorized(text):
@@ -460,6 +534,7 @@ def make_guarded_agent_class():
                     state.messages.append(draft)
                     return draft, state
                 violations = []
+                hints: list[str] = []
                 writes = 0
                 write_signatures = []
                 for call in draft.tool_calls or []:
@@ -476,7 +551,12 @@ def make_guarded_agent_class():
                         domain=spec.domain if spec else None, strength="hard")
                         if isinstance(self.memory, StructuredPreferenceMemory) else
                         self._current_constraints.active("current-user", domain=spec.domain if spec else None, strength="hard"))
-                    violations.extend(self.checker.check(action, [] if ignores_purchase_preferences(call.name) else preferences, facts))
+                    checked = self.checker.check(action, [] if ignores_purchase_preferences(call.name) else preferences, facts)
+                    violations.extend(checked)
+                    if any(v.code == "preference_conflict" for v in checked):
+                        hint = self._candidate_hint(call.name, preferences)
+                        if hint:
+                            hints.append(hint)
                     if call.name not in {tool.name for tool in self.tools}:
                         violations.append(Violation("unsupported_tool", "Tool is not available in this subtask"))
                     expected_user = self.user_profile.get("user_id")
@@ -518,7 +598,8 @@ def make_guarded_agent_class():
                 self.guard_audit.append({"attempt": attempt + 1, "violations": detail})
                 feedback = [SystemMessage(role="system", content=
                     "Pre-execution checks rejected the draft. No tool was executed. Regenerate or ask for missing information. "
-                    + json.dumps(detail, ensure_ascii=False))]
+                    + json.dumps(detail, ensure_ascii=False)
+                    + "".join("\n" + hint for hint in dict.fromkeys(hints)))]
             blocked = AssistantMessage(role="assistant", content=
                 "当前操作缺少可验证的信息或违反已知约束，尚未执行。请补充信息或调整方案。",
                 cost=cost, usage=usage)

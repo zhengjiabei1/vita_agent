@@ -1,6 +1,6 @@
 # 验证记录与真实实验边界
 
-2026-10-27 在新环境重新运行完整测试：`python -m pytest -q`，**284 passed，无 skip**（已安装固定官方 VitaBench 包）。测试中的模型生成使用替身，不产生推理费用，也不构成 benchmark 成绩。
+2026-10-27 在新环境重新运行完整测试：`python -m pytest -q`，**288 passed，无 skip**（已安装固定官方 VitaBench 包）。测试中的模型生成使用替身，不产生推理费用，也不构成 benchmark 成绩。
 
 本次交接还重新通过以下本地检查：
 
@@ -13,7 +13,8 @@
 - `python scripts/verify_provider.py ...`：OpenCode 免费模型一次最小工具调用返回 HTTP 429 `FreeUsageLimitError`；ledger 立即 halt，后续请求被拒绝。用户明确授权付费 Go 后，端点 `https://opencode.ai/inference/go/openai/v1`（需 `x-opencode-session`）预检通过：工具调用 1 次、JSON 解析成功、106,659 Token 长上下文命中目标串，usage 字段完整。免费阻塞记录见 [reports/2026-10-27-provider-quota](../reports/2026-10-27-provider-quota/)。
 - 新 Go 模型真实训练 prefix2：1 个训练用户 × 2 子任务 × baseline/harness/memory 各 1 trial，三臂均 **0.0**，update 子集均 0.0；无用户级置信区间。共享 ledger 用 176/200 请求，输入 1,828,931、输出 56,745 Token，估算 0.30838665 USD。详见 [reports/2026-10-27-go-train-prefix2](../reports/2026-10-27-go-train-prefix2/)。
 - P0 修正后的 Go dev smoke：1 个 dev 用户 × 2 子任务 × baseline/harness/memory 各 1 trial，三臂仍 **0.0**，但都正常 `agent_stop`/`user_stop`，不再 `max_steps`，工具错误 0。baseline/harness 选到带浴缸房型但未支付；memory 外卖非方便面但 26 分钟（要求 25 分钟内）。第一轮累计 186/200 请求、2,239,881 输入、45,541 输出，估算 0.36331 USD，剩余 14。
-- 第二轮 dev smoke：加入 `memory_harness`（结构化记忆 + guards，无技能），修正自动支付和独立酒店设施槽。仍 **0.0**；但 `memory_harness` 最终选中精确目标商品“清汤面”，地址正确、`shipping_time=25.0`、非方便面、已支付，trajectory judge 仍给 0.0。另一次 `memory_harness` 在酒店阶段 `max_steps`，说明硬设施约束需要候选反馈/连续 BLOCK 退让。第二轮 176/200 请求、2,379,714 输入、35,668 输出，估算 0.37836 USD，剩余 24。详见 [reports/2026-10-27-go-dev-p0-smoke/round2.json](../reports/2026-10-27-go-dev-p0-smoke/round2.json)。
+- 第二轮 dev smoke：加入 `memory_harness`（结构化记忆 + guards，无技能），修正自动支付和独立酒店设施槽。仍 **0.0**。`memory_harness` 的 v5 轨迹最终选中精确目标商品“清汤面”，地址正确、`shipping_time=25.0`、非方便面、已支付；但该子任务终止原因为 `MAX_STEPS`。复核官方 `src/vita/evaluator/evaluator.py` 后确认：`MAX_STEPS`（以及 `TOO_MANY_ERRORS`、`INVALID_AGENT_MESSAGE`）会直接返回 `reward=0.0`，**不调用 trajectory judge**。v4 baseline 的外卖同样满足 rubric，也因 `MAX_STEPS` 未获评分。此前“状态满足但 judge 0 分”的判断是误判，已在 [diagnosis.md](../reports/2026-10-27-go-dev-p0-smoke/diagnosis.md) 更正。第二轮 176/200 请求、2,379,714 输入、35,668 输出，估算 0.37836 USD，剩余 24。详见 [reports/2026-10-27-go-dev-p0-smoke/round2.json](../reports/2026-10-27-go-dev-p0-smoke/round2.json)。
+- 过早终止修复（未调用模型）：`build_plan` 现在拒绝 `max_steps < 50`（官方 README 的 personalization 命令使用 50）；原因是本次实测命令传了 `--max-steps 20`，导致正确订单被强制判 0。另加入 BLOCK 候选反馈：从已观察的酒店/商品中列出满足全部硬约束的候选，避免 agent 反复追问、耗尽步数。测试 288 项通过。
 - 训练零分诊断脚本和规则技能导出：archived baseline/harness 两臂均 `exported=0`，原因是没有任何已识别工具错误；新 Go 三臂也无工具错误。没有用演示技能补足。见 [reports/2026-10-27-zero-score-diagnosis](../reports/2026-10-27-zero-score-diagnosis/)。
 - 零分后的 P0 修正：官方 CGL 默认 `VITA_CGL_UNKNOWN_POLICY=warn`，未知事实不再无限阻塞，明确违反仍 BLOCK；酒店观察解析品牌/设施，支持 hard 品牌和电话叫醒检查；未支付订单会阻止“已完成”声明并触发重生成；预算账本按 variant 标记请求。新增对应单元测试，不产生模型调用。
 

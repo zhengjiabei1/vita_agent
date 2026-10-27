@@ -50,6 +50,11 @@ def test_user_split_is_deterministic_and_does_not_split_a_user(inputs):
     assert all(not x & y for i, x in enumerate(partitions) for y in partitions[i + 1:])
 
 
+def test_short_max_steps_is_rejected_to_avoid_premature_termination_zeros(inputs):
+    with pytest.raises(ValueError, match="premature-termination"):
+        build_plan(**dict(inputs, max_steps=20))
+
+
 def test_model_preflight_reports_names_not_secret_values(inputs):
     result = model_preflight(inputs["model_config"], "test-model", environment={"VITA_TEST_KEY": "private-test-value"})
     assert result["ready"] and result["required_variable_names"] == ["VITA_TEST_KEY"]

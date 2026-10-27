@@ -6,7 +6,7 @@
 
 实现 **Training-Free Personalized Service Agent on VitaBench 2.0**：执行前约束检查、带证据的结构化偏好记忆、从训练失败轨迹离线提炼并冻结的技能库。用户已说明简历中的 `0.440 → 0.570`、`+8.6%`、`0.38 → 0.48`、`4.6pp` 是猜测值；它们不是结果，也不应作为调参必须达到的目标。
 
-当前是已有代码、单元测试和小规模真实训练试验的研究原型，**完整实验尚未完成，也没有证实性能提升**。截至 2026-10-27，284 项测试通过（已安装固定官方包，无 skip）；本地模拟演示成功；`ruff --select E4,E7,E9,F` 检查通过。未指定规则的全面 Ruff 检查仍有风格/类型建议，不能称为所有静态规则通过。
+当前是已有代码、单元测试和小规模真实训练试验的研究原型，**完整实验尚未完成，也没有证实性能提升**。截至 2026-10-27，288 项测试通过（已安装固定官方包，无 skip）；本地模拟演示成功；`ruff --select E4,E7,E9,F` 检查通过。未指定规则的全面 Ruff 检查仍有风格/类型建议，不能称为所有静态规则通过。
 
 用户要求换平台/模型继续。此前 DeepSeek 总预算上限是 20 元，随后明确转向免费模型，付费调用已暂停。**不要恢复旧付费调用，不要把此前预算视为新平台的付费授权。** 密钥只通过环境设置提供，不放进聊天、Git、日志或结果文件。旧 `VITA_API_KEY` 绑定 DeepSeek 域名，不能直接拿到新供应商使用。
 
@@ -18,11 +18,17 @@ OpenCode 免费模型 `deepseek-v4.1-flash-free` 的最小预检返回 HTTP 429 
 
 随后在 dev 用户 `B471882`（2 子任务）分两轮跑 smoke：第一轮 baseline/harness/memory 三臂 **0.0**（186 请求，估算 0.36331 USD）；第二轮加入 `memory_harness`（结构化记忆 + guards，无技能）并修正支付/设施槽，仍 **0.0**（176/200 请求，2,379,714 输入、35,668 输出，估算 0.37836 USD，剩余 24）。三臂工具错误 0。
 
-第二轮关键观察：`memory_harness` 的酒店选到带浴缸并已支付，外卖最终选中**精确目标商品** `清汤面`，地址正确、`shipping_time=25.0`、非方便面、已支付；但 trajectory judge 仍给 subtask 1 0.0。v4 baseline 也出现同样的“状态满足但 judge 0”现象。这提示下一步要检查 **trajectory judge 的证据可见性**（agent 最终回复是否明确逐条说明约束），并可用 outcome evaluator 做离线诊断；不能直接把 0 分归因于 agent 行为。
+第二轮关键观察（已修正此前误判）：v5 `memory_harness` 的外卖最终选中**精确目标商品** `清汤面`（P00083），地址正确、`shipping_time=25.0`、非方便面、已支付；v4 baseline 也出现同样的正确订单，但两者都没有被 judge 评分。原因写在官方 `src/vita/evaluator/evaluator.py`：当 `termination_reason` 为 `MAX_STEPS`（或 `TOO_MANY_ERRORS`、`INVALID_AGENT_MESSAGE`）时直接返回 `reward=0.0`，根本不调用 trajectory judge。日志里对应 `note: Simulation terminated prematurely ... MAX_STEPS`。
 
-`memory_harness` 在同一轮也出现酒店阶段 `max_steps`：硬品牌/设施约束把候选全部挡住后没有候选反馈/退让机制。下一步应加“候选列表反馈 + 连续 BLOCK 3 次放行并打标”，而不是继续加硬约束。
+根因是我们自己传了 `--max-steps 20`，而官方 README 的 personalization 命令用 `--max-steps 50`（`build_plan` 默认也是 50）。因此此前“状态满足但 judge 给 0”的判断是错的，实际是 **过早终止惩罚**，不是评分器证据可见性问题。v4 harness/memory_harness 的 0 分则被正常评分：外卖选了方便面/配送 26 分钟、酒店房型无浴缸或无停车场，属于真实未满足 rubric。
 
-两轮累计 362/400 请求，估算约 0.7417 USD。没有跑 skills/full/test。证据见 [dev smoke](reports/2026-10-27-go-dev-p0-smoke/round2.json)。
+已修复（未调用模型）：`experiments.build_plan` 现在拒绝 `max_steps < 50`，并说明低步数会产生过早终止零分；新增 **候选反馈**：当写入因硬约束被 BLOCK 时，guard 从已观察的搜索结果里列出满足全部硬约束的酒店/商品，避免模型反复询问并在 20 步内耗尽。测试 288 项通过。
+
+这解释了目前**所有** 0.0：要么是真实未满足 rubric，要么是 `max_steps` 过早终止。没有证据表明 trajectory judge 漏看证据；在拿到 ≥50 步的重跑之前，不应再声称评分器问题。
+
+`memory_harness` 酒店阶段 `max_steps` 的具体表现是：用户在对话中指定了无停车场/无浴缸的酒店，agent 被 guard 拦住后只反复追问用户，没有回到已搜索到的候选（如 `都市118连锁酒店(重庆大学城店)`，tags 含经济型/连锁/停车场/浴缸）。候选反馈正是针对这个循环。
+
+两轮累计 362/400 请求，估算约 0.7417 USD。没有跑 skills/full/test。证据见 [dev smoke](reports/2026-10-27-go-dev-p0-smoke/round2.json) 与 [第二轮诊断](reports/2026-10-27-go-dev-p0-smoke/diagnosis.md)。
 
 ## 已完成的实现
 
@@ -104,7 +110,7 @@ Qwen Code 官方文档已注明 OAuth 免费套餐 2026-04-15 停用，不依赖
 
 先读 HANDOFF.md、README.md、docs/verification.md、docs/experiments.md，以及 reports/2026-10-26-train-prefix2/、reports/2026-10-27-zero-score-diagnosis/、reports/2026-10-27-provider-quota/。检查代码和证据，不要从零重写。
 
-简历中的 0.440→0.570、8.6%、0.38→0.48、4.6pp 都是猜测，禁止作为真实结果。当前284项测试通过；已完成新 Go 模型上1个训练用户、2子任务、baseline/harness/memory各1trial（三臂0分），以及1个dev用户、2子任务的P0 smoke两轮（均0分）；都不是测试集，也未完成 skills/full 和完整消融。两轮累计362/400请求、估算约0.7417 USD，剩余24。下一步先诊断 trajectory judge 的证据可见性（状态满足但0分），加候选反馈/连续BLOCK放行，再跑 skills/full 和保留测试。
+简历中的 0.440→0.570、8.6%、0.38→0.48、4.6pp 都是猜测，禁止作为真实结果。当前288项测试通过；已完成新 Go 模型上1个训练用户、2子任务、baseline/harness/memory各1trial（三臂0分），以及1个dev用户、2子任务的P0 smoke两轮（均0分）；都不是测试集，也未完成 skills/full 和完整消融。两轮累计362/400请求、估算约0.7417 USD，剩余24。已确认此前“状态满足但judge 0分”是误判：实际是 `--max-steps 20` 触发官方过早终止惩罚（直接返回0、不调用judge）；已改为强制 `max_steps >= 50`，并加入候选反馈。下一步用新额度以50步重跑 dev smoke，再跑 skills/full 和保留测试。
 
 我要换平台/模型继续，优先免费API；旧DeepSeek付费调用已停止。先完成本地工作，再通过环境密钥设置获取实际需要的凭据，不能让我在聊天里贴Key，也不能未经授权产生费用。
 

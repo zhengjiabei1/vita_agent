@@ -22,6 +22,10 @@ from .evaluation import compare_runs, split_users
 from .skills import FrozenSkillBank
 
 UPSTREAM_COMMIT = "f60169e89f30499cb7883f3dad76bd03facc908d"
+# Upstream's documented personalization run uses `--max-steps 50`. A lower cap
+# makes the evaluator return 0 for premature termination without judging the
+# trajectory at all, so short-cap plans are not valid measurements.
+MIN_MAX_STEPS = 50
 VARIANTS = {
     "baseline": {"memory": "full_context", "guards": False, "skills": False},
     "harness": {"memory": "full_context", "guards": True, "skills": False},
@@ -198,6 +202,8 @@ def build_plan(dataset: str | Path, output: str | Path, *, model_config: str | P
     for name, value in (("num_trials", num_trials), ("max_steps", max_steps)):
         if isinstance(value, bool) or not isinstance(value, int) or value < 1:
             raise ValueError(f"{name} must be positive")
+    if max_steps < MIN_MAX_STEPS:
+        raise ValueError(f"max_steps below {MIN_MAX_STEPS} forces premature-termination zeros (upstream default is 50)")
     variants = list(variants or VARIANTS)
     if not variants or len(set(variants)) != len(variants) or any(v not in VARIANTS for v in variants):
         raise ValueError("Choose unique known ablations")
