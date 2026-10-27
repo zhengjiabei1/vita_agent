@@ -25,22 +25,26 @@ def load_users(dataset_path: str, task_ids: list[str]) -> dict[str, list[str]]:
 
 def extract(path: Path, domains: dict[str, list[str]]) -> dict:
     data = json.loads(path.read_text(encoding="utf-8"))
-    per_user, per_domain, terminations, tool_errors, subtasks = {}, {}, {}, {}, {}
+    per_user_trials, subtask_trials, per_domain, terminations, tool_errors = {}, {}, {}, {}, {}
     for simulation in data["simulations"]:
         task_id = simulation["task_id"]
         reward_info = simulation["reward_info"]
-        per_user[task_id] = reward_info["reward"]
+        per_user_trials.setdefault(task_id, []).append(reward_info["reward"])
         detail = (reward_info.get("info") or {}).get("subtask_rewards") or {}
-        scores = [detail[f"subtask_{i}_reward"] for i in range(len(domains.get(task_id, [])))
-                  if f"subtask_{i}_reward" in detail]
-        subtasks[task_id] = scores
-        for i, score in enumerate(scores):
+        for i in range(len(domains.get(task_id, []))):
+            key = f"subtask_{i}_reward"
+            if key not in detail:
+                continue
+            subtask_trials.setdefault(task_id, {}).setdefault(i, []).append(detail[key])
             domain = domains[task_id][i] if i < len(domains.get(task_id, [])) else "unknown"
-            per_domain.setdefault(domain, []).append(score)
-        terminations[task_id] = simulation["termination_reason"]
-        tool_errors[task_id] = sum(1 for m in simulation.get("messages", [])
-                                   if m.get("role") == "tool" and m.get("error"))
-    return {"per_user": per_user, "subtasks": subtasks,
+            per_domain.setdefault(domain, []).append(detail[key])
+        terminations.setdefault(task_id, []).append(simulation["termination_reason"])
+        tool_errors.setdefault(task_id, []).append(
+            sum(1 for m in simulation.get("messages", []) if m.get("role") == "tool" and m.get("error")))
+    per_user = {task_id: mean(values) for task_id, values in per_user_trials.items()}
+    subtasks = {task_id: [mean(values[i]) for i in sorted(values)]
+                for task_id, values in subtask_trials.items()}
+    return {"per_user": per_user, "subtasks": subtasks, "trials": len(data["simulations"]) // len(per_user),
             "domains": {k: {"n": len(v), "mean": mean(v)} for k, v in per_domain.items()},
             "terminations": terminations, "tool_errors": tool_errors}
 
