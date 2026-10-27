@@ -15,7 +15,8 @@
 - 针对真实 0 分完成一轮代码修正：官方 CGL 未知事实 fail-open、明确违反仍拦截；补充酒店品牌/电话叫醒/设施事实检查、未支付订单完成拦截和创建订单后自动支付；预算按 variant 归因；新增回归测试。
 - 在 1 个 dev 用户 × 2 子任务上完成两轮 P0 smoke：baseline/harness/memory/memory_harness 均 0.0。第二轮 memory_harness 选中精确目标商品“清汤面”，地址、25 分钟、非方便面、支付均满足；但该子任务触发 `max_steps`，官方 evaluator 对过早终止直接返回 0、不调用 judge。已确认全部零分都来自真实 rubric 未满足或 `--max-steps 20` 过早终止，并已强制 `max_steps >= 50`、加入候选反馈。未声称提升。
 - 完成第三轮 50 步 dev smoke（1 用户 × 2 子任务 × 1 trial，三个代码状态）：最高 **0.5**，其中两单为精确目标商品、地址正确、25 分钟、非方便面、已支付；但 baseline 同样拿到 0.5，且 n=1、代码不同，不能归因于任一模块，**未声称提升**。
-- 292 项测试通过；本地演示与官方固定版本/数据哈希校验通过；三轮 Go 实验累计 618 请求、估算约 1.3139 USD；正式测试集评测和 skills/full 五组消融尚未完成（额度不足，需新计划）。
+- 完成一次完整 dev 配对：11 个 dev 用户 × 前 2 子任务 × 3 臂 × 1 trial，固定源码与 50 步。结果 baseline **0.409**、harness **0.273**、memory_harness **0.182**；配对差值均跨 0，**未显示提升**。每臂每用户仅 1 trial，同一用户已出现 0.0/0.5/1.0 波动，因此不能把负差值解释为机制有害。
+- 293 项测试通过；本地演示与官方固定版本/数据哈希校验通过；四轮 Go 实验累计 1,546 请求、估算约 3.5128 USD；正式测试集评测和 skills/full 五组消融尚未完成（需先做多 trial 方差估计）。
 
 **可诚实写的能力关键词**：VitaBench 2.0、LLM Agent、执行前约束检查、结构化偏好记忆、证据引用、离线技能演化、可复现实验、配额/预算控制、Python、pytest。
 
@@ -32,7 +33,8 @@
 - Followed the real zero-score diagnosis with a code-only correction pass: fail-open CGL for unknown facts, explicit violations still blocked, hotel brand/phone-wakeup/feature facts, unpaid-order completion guard, automatic payment after order creation, and per-variant budget attribution, with regression tests.
 - Ran two P0 dev-smoke rounds on 1 user × 2 subtasks: baseline/harness/memory/memory_harness all scored 0.0. In the second round memory_harness selected the exact target item “清汤面” with the correct address, 25-minute delivery, non-instant-noodle tag and paid status, but that subtask hit `max_steps`; upstream returns 0 without invoking the judge for premature termination. Every zero is accounted for by a genuinely unmet rubric or the `--max-steps 20` cap; plans now enforce `max_steps >= 50` and blocked writes receive observed-candidate feedback. No improvement is claimed.
 - Ran a third 50-step dev smoke (1 user × 2 subtasks × 1 trial across three code states): the best score was **0.5**, with two orders matching the exact target item, correct address, 25-minute delivery, no instant-noodle tag and paid status; baseline also scored 0.5, so with n=1 and differing code states this cannot be attributed to any module and **no improvement is claimed**.
-- 292 tests pass; pinned version/data checks and local demo pass; the three Go rounds used 618 requests (~1.3139 USD estimate); formal held-out evaluation and the skills/full five-variant ablation remain unfinished (quota exhausted, new plan required).
+- Ran a complete dev pairing (11 dev users × first 2 subtasks × 3 arms × 1 trial, fixed source and 50 steps): baseline **0.409**, harness **0.273**, memory_harness **0.182**; both paired deltas span zero, so **no improvement is shown**. With one trial per user and observed 0.0/0.5/1.0 swings for the same user, the negative point estimates cannot be read as evidence of harm either.
+- 293 tests pass; pinned version/data checks and local demo pass; the four Go rounds used 1,546 requests (~3.5128 USD estimate); formal held-out evaluation and the skills/full five-variant ablation remain unfinished (multi-trial variance estimation comes first).
 
 ## 不应写的内容
 

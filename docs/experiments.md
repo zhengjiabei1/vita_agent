@@ -12,6 +12,8 @@ P0 修正后又用新增额度跑了 1 个 dev 用户 × 2 子任务 × 三臂�
 
 第三轮（新授权 300 请求）在 50 步下跑同一 dev 用户、2 子任务、每臂 1 trial，分三个代码状态：v6 = 0.0/0.0/**0.5**，v7 全 0.0，v8 = **0.5**/0.0/0.0。拿到 1.0 的两单都是目标商品 `P00083 清汤面`、地址正确、`shipping_time=25.0`、非方便面、已支付；但 baseline 同样拿到 0.5，不能归因于 memory_harness，而且 n=1、代码不同，不是受控对比。第三轮 ledger **256/300 请求**，估算 **0.5722089 USD**，剩余 44；三轮累计 **618 请求**、约 **1.3139 USD**。详见 [reports/2026-10-27-go-dev-50step](../reports/2026-10-27-go-dev-50step/)。
 
+第四轮完整 dev 配对（新授权 1000 请求）：11 个 dev 用户 × 前 2 子任务 × 3 臂 × 1 trial，固定源码 `9632aa0`、50 步。baseline **0.409**、harness **0.273**、memory_harness **0.182**；配对差值 harness−baseline −0.136（95% CI [−0.409, +0.182]）、memory_harness−baseline −0.227（[−0.500, +0.045]）。无提升证据，点估计为负但区间跨 0；每臂每用户仅 1 trial，同一用户已出现 0.0/0.5/1.0 波动，因此不能据此断言机制有害。ledger 928/1000 请求，估算 2.19887535 USD，剩余 72；四轮累计 1,546 请求、约 3.5128 USD。详见 [reports/2026-10-27-go-dev-full](../reports/2026-10-27-go-dev-full/)。
+
 后续新增修复：酒店“浴缸”改为房间级属性；系统提示主动列出候选；候选只有在每个硬约束都有可观察证据时才声称满足（v8 的旧提示曾把未知配送时间写成满足，导致 26 分钟订单）。下一步必须固定源码、用多 trial 估计波动，再扩用户；免费额度阻塞记录见 [reports/2026-10-27-provider-quota](../reports/2026-10-27-provider-quota/)。
 
 默认比较 full-context baseline、full-context + harness、structured memory、full-context + frozen skills、structured memory + harness + frozen skills。结构化记忆的当前轮提取属于记忆模块的处理；baseline 保留官方 full-context 记忆。技能单独收益只用 `skills - baseline`，不能用 `full - baseline` 代替。
@@ -24,6 +26,8 @@ P0 修正后又用新增额度跑了 1 个 dev 用户 × 2 子任务 × 三臂�
 - `--phase smoke`：一个开发用户，调试实际链路。
 - `--phase small`：最多三个开发用户，开发期消融。
 - `--phase full`：全部保留测试用户。实现与参数冻结后才运行；建议 `--num-trials 4`。
+
+显式 `--user-limit N` 会直接取该分区的 N 个用户，并覆盖 smoke=1 / small=3 的默认队列（例如 `--phase smoke --user-limit 11` 用于 11 个 dev 用户的开发对比，仍不是测试集）。
 
 在完整 56 用户数据集上，此规则得到 train=33、dev=11、test=12。正式结果是这 12 个保留用户的实验，不应描述为官方全部 56 用户排行榜成绩。
 
