@@ -354,3 +354,37 @@ def test_official_usage_retains_cache_counts_and_cost_uses_them(monkeypatch, tmp
     preserved = fake.get_response_usage(raw)
     assert preserved["prompt_cache_hit_tokens"] == 990_000
     assert fake.get_response_cost(preserved, "deepseek-flash") == pytest.approx(0.0676)
+
+
+def test_transient_429_rate_limit_does_not_halt_the_shared_ledger(tmp_path):
+    path = tmp_path / "free.db"
+    ledger = BudgetLedger(path, limit=5, currency="FREE",
+                          pricing_basis="free_provider_quota", mode="requests")
+
+    class RateLimitError(Exception):
+        status_code = 429
+
+    wrapped = _Completions(SimpleNamespace(create=lambda **kw: (_ for _ in ()).throw(
+        RateLimitError("rate_limit_exceeded: client request rate limit exceeded "
+                       "(requests per second), retry after the indicated delay"))), ledger,
+        {"free-model": {"billing": "free", "free_quota": {"unit": "request"}}})
+    with pytest.raises(RateLimitError):
+        wrapped.create(model="free-model", messages=[{"role": "user", "content": "hi"}], max_tokens=10)
+    summary = ledger.summary()
+    assert not summary["halted"]
+    assert summary["counts"] == {"uncertain": 1}
+    ledger.reserve("free-model", 1000, 100, units=1)
+
+
+def test_payment_required_and_explicit_quota_messages_still_halt():
+    from vita_agent.budget import _provider_quota_error
+
+    class PaymentRequired(Exception):
+        status_code = 402
+
+    class QuotaReached(Exception):
+        status_code = 429
+
+    assert _provider_quota_error(PaymentRequired("payment required"))
+    assert _provider_quota_error(QuotaReached("Free usage limit reached"))
+    assert not _provider_quota_error(QuotaReached("too many requests, retry later"))

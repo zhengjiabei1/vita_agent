@@ -11,8 +11,10 @@ Two accounting modes are supported:
 
 Network failures and missing usage keep their full reservation. SDK retries are
 disabled. All official Agent, User and Evaluator calls using
-``llm_utils._get_client`` share this accounting. Provider 429/quota exhaustion
-halts the shared ledger so later phases cannot continue spending quota.
+``llm_utils._get_client`` share this accounting. A hard quota/payment stop
+(402, explicit usage-limit message) halts the shared ledger so later phases
+cannot continue spending quota; a transient 429 rate limit is re-raised for the
+caller's bounded retry instead of permanently halting the ledger.
 
 This is an admission control guard, not a provider billing guarantee: tariffs,
 tokenization, hidden usage and provider-side retries can differ. Any observed
@@ -99,18 +101,25 @@ def _units(value: Any, name: str, *, mode: str) -> float:
 
 
 def _provider_quota_error(exc: BaseException) -> bool:
-    """Recognise a provider-side free-quota/rate-limit stop.
+    """Recognise a hard provider-side quota/payment stop.
 
-    This deliberately does not treat every network error as quota exhaustion;
-    only an explicit 429/402 status or a known quota message halts the ledger.
+    A 402 or an explicit quota/usage-limit message halts the shared ledger.
+    A plain 429 is *not* automatically a quota stop: providers also use 429 for
+    short-lived per-second rate limits ("requests per second", "retry after"),
+    which the caller should retry rather than converting into a permanent halt.
     """
     status = getattr(exc, "status_code", None)
-    if isinstance(status, int) and status in (402, 429):
-        return True
     text = f"{exc}".casefold()
-    return any(marker in text for marker in (
-        "free usage limit", "quota", "rate limit", "insufficient account funds",
-        "too many requests", "resource_exhausted"))
+    quota_markers = (
+        "free usage limit", "usage limit reached", "exceeded your current quota",
+        "insufficient account funds", "quota", "resource_exhausted",
+        "billing hard limit",
+    )
+    if isinstance(status, int) and status == 402:
+        return True
+    if isinstance(status, int) and status == 429:
+        return any(marker in text for marker in quota_markers)
+    return any(marker in text for marker in quota_markers)
 
 
 def _free_units(model_config: Mapping[str, Any], unit: str) -> float:
