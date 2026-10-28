@@ -58,6 +58,22 @@ def test_plain_guard_variants_disable_prompt_nudges(inputs):
     assert plain["VITA_ENABLE_GUARDS"] == "1"
 
 
+def test_explicit_user_ids_select_a_paired_dev_subset(inputs):
+    manifest = dataset_manifest(inputs["dataset"])
+    dev = manifest["users"]["dev"]
+    chosen = [dev[min(1, len(dev) - 1)], dev[0]]
+    plan = build_plan(**dict(inputs, user_ids=chosen, memory_extraction="rules"))
+    assert set(plan["selected_user_ids"]) == set(chosen)
+    other = inputs["output"].parent / "bad-plan"
+    with pytest.raises(ValueError, match="partition"):
+        build_plan(**dict(inputs, output=other, user_ids=[manifest["users"]["train"][0]],
+                          memory_extraction="rules"))
+    third = inputs["output"].parent / "both-plan"
+    with pytest.raises(ValueError, match="not both"):
+        build_plan(**dict(inputs, output=third, user_ids=[dev[0]], user_limit=1,
+                          memory_extraction="rules"))
+
+
 def test_explicit_user_limit_overrides_the_smoke_cohort_cap(inputs):
     plan = build_plan(**dict(inputs, user_limit=2, memory_extraction="rules"))
     assert plan["phase"] == "smoke" and len(plan["selected_user_ids"]) == 2

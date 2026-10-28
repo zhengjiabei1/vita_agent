@@ -195,7 +195,8 @@ def build_plan(dataset: str | Path, output: str | Path, *, model_config: str | P
                model: str, upstream: str | Path, phase: str = "smoke", variants=None,
                skill_bank: str | Path | None = None, seed: int = 42, num_trials: int = 1,
                max_steps: int = 50, project_root: str | Path | None = None,
-               memory_extraction: str = "llm", user_limit: int | None = None) -> dict:
+               memory_extraction: str = "llm", user_limit: int | None = None,
+               user_ids: list[str] | None = None) -> dict:
     """Save a non-overwritable plan; smoke/small use dev, full uses held-out test."""
     if phase not in ("smoke", "small", "full", "train"):
         raise ValueError("phase must be smoke, small, full or train")
@@ -203,7 +204,14 @@ def build_plan(dataset: str | Path, output: str | Path, *, model_config: str | P
         raise ValueError("memory_extraction must be rules or llm")
     if user_limit is not None and (isinstance(user_limit, bool) or not isinstance(user_limit, int) or user_limit < 1):
         raise ValueError("user_limit must be a positive integer")
-    if phase == "full" and user_limit is not None:
+    if user_ids is not None:
+        if user_limit is not None:
+            raise ValueError("Choose either user_limit or user_ids, not both")
+        if (not isinstance(user_ids, list) or not user_ids
+                or any(not isinstance(item, str) or not item for item in user_ids)
+                or len(set(user_ids)) != len(user_ids)):
+            raise ValueError("user_ids must be a nonempty list of unique strings")
+    if phase == "full" and (user_limit is not None or user_ids is not None):
         raise ValueError("full phase evaluates the entire declared test partition; use dev for limited experiments")
     for name, value in (("num_trials", num_trials), ("max_steps", max_steps)):
         if isinstance(value, bool) or not isinstance(value, int) or value < 1:
@@ -222,7 +230,12 @@ def build_plan(dataset: str | Path, output: str | Path, *, model_config: str | P
         raise ValueError("Official loader requires a personalization/tasks.json dataset path")
     partition = "test" if phase == "full" else "train" if phase == "train" else "dev"
     selected_users = data["users"][partition]
-    if user_limit is not None:
+    if user_ids is not None:
+        unknown = set(user_ids) - set(selected_users)
+        if unknown:
+            raise ValueError(f"user_ids must belong to the {partition} partition")
+        selected_users = [user for user in selected_users if user in set(user_ids)]
+    elif user_limit is not None:
         # An explicit cohort size defines the experiment: do not let the phase
         # alias silently shrink it (smoke=1, small=3 remain the defaults).
         selected_users = selected_users[:user_limit]
@@ -517,6 +530,7 @@ def main(argv=None) -> None:
     create.add_argument("--max-steps", type=int, default=50)
     create.add_argument("--memory-extraction", choices=("rules", "llm"), default="llm")
     create.add_argument("--user-limit", type=int)
+    create.add_argument("--user-ids", nargs="+")
     execute = sub.add_parser("execute", help="Run real evaluations after prerequisites and quota are configured")
     execute.add_argument("plan", type=Path)
     budgets = execute.add_mutually_exclusive_group()

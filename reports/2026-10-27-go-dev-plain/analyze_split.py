@@ -71,6 +71,8 @@ def main() -> int:
     parser.add_argument("--baseline", required=True)
     parser.add_argument("--plan", required=True)
     parser.add_argument("--dataset", required=True)
+    parser.add_argument("--arm", action="append", default=[],
+                        help="Override an arm result: NAME=PATH (repeatable)")
     parser.add_argument("--samples", type=int, default=10000)
     args = parser.parse_args()
 
@@ -81,6 +83,11 @@ def main() -> int:
     arms = {"baseline": baseline}
     for run in plan["runs"]:
         arms[run["variant"]] = summarize(Path(run["result"]), set(users), domains)
+    for override in args.arm:
+        name, _, path = override.partition("=")
+        if not name or not path:
+            raise SystemExit("--arm must be NAME=PATH")
+        arms[name] = summarize(Path(path), set(users), domains)
     missing = [u for u in users if u not in baseline["per_user"]]
     if missing:
         raise SystemExit(f"baseline is missing users: {missing}")
