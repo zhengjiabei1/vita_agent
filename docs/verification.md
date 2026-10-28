@@ -1,6 +1,6 @@
 # 验证记录与真实实验边界
 
-2026-10-27 在新环境重新运行完整测试：`python -m pytest -q`，**296 passed，无 skip**（已安装固定官方 VitaBench 包）。测试中的模型生成使用替身，不产生推理费用，也不构成 benchmark 成绩。
+2026-10-28 在新环境重新运行完整测试：`python -m pytest -q`，**299 passed，无 skip**（已安装固定官方 VitaBench 包）。测试中的模型生成使用替身，不产生推理费用，也不构成 benchmark 成绩。
 
 本次交接还重新通过以下本地检查：
 
@@ -17,6 +17,8 @@
 - 第三轮 50 步 dev smoke（新授权 300 请求）：dev 用户 `B471882`、2 子任务、每臂 1 trial，三个代码状态。v6 = 0.0/0.0/**0.5**，v7 全 0.0，v8 = **0.5**/0.0/0.0。拿到 1.0 的两单均为 `P00083 清汤面`、地址正确、`shipping_time=25.0`、非方便面、已支付；baseline 也拿到 0.5，不能归因于 memory_harness，且 n=1、代码不同，不构成受控对比。ledger 256/300 请求、3,574,878 输入、59,962 输出、估算 0.5722089 USD，剩余 44。详见 [reports/2026-10-27-go-dev-50step](../reports/2026-10-27-go-dev-50step/)。
 - 第四轮完整 dev 配对（新授权 1000 请求）：11 个 dev 用户 × 前 2 子任务 × baseline/harness/memory_harness × 1 trial，固定源码 `9632aa0`、50 步、seed 42。均值 **baseline 0.409 / harness 0.273 / memory_harness 0.182**；配对差值 harness−baseline −0.136（95% CI [−0.409, +0.182]）、memory_harness−baseline −0.227（[−0.500, +0.045]）。**无提升证据，点估计为负，区间均跨 0。** ledger 928/1000 请求、13,835,361 输入、205,952 输出、估算 2.19887535 USD，剩余 72。详见 [reports/2026-10-27-go-dev-full](../reports/2026-10-27-go-dev-full/)。
 - 方差提示：同一用户 B471882 在近乎相同代码上，memory_harness 已出现 0.5 / 0.0 / 1.0；抽查 instore 失败轨迹，订单/预约均成功执行，只是选错店或商品，不是 guard 拦截。因此第四轮的负差值不能解释为机制有害，n=1 不足以区分效应与波动。
+- 第五轮提示词/约束隔离（8 个 dev 用户 × 2 子任务 × 2 trials）：关闭完成前说明与候选列表后，baseline **0.312**、guards_plain **0.281**、memory_guards_plain **0.281**；配对差值均为 **−0.031**，95% CI 分别为 [−0.125, +0.062] 与 [−0.250, +0.219]，均跨 0。**约束检查与 baseline 无可检测差异**；上一轮 harness 的负点估计未复现。本轮两个账本合计 1,678/1,850 请求、估算 3.76551 USD。详见 [reports/2026-10-27-go-dev-plain](../reports/2026-10-27-go-dev-plain/)。
+- 额度 bug 修复：供应商 429 `requests per second` 限流曾被误判为额度耗尽并永久 halt，导致 10 条轨迹被拒；现普通 429 交给上游有界重试，只有 402/明确 quota 消息才 halt，并有回归测试。
 - 50 步后新增修复：酒店“浴缸”按房型而非酒店标签判定；候选反馈扩展到系统提示；候选只有在每个硬约束都有可观察证据时才声称满足（v8 的旧提示曾把未知配送时间写成满足，导致 26 分钟订单）。测试 292 项通过。
 - 过早终止修复（未调用模型）：`build_plan` 现在拒绝 `max_steps < 50`（官方 README 的 personalization 命令使用 50）；原因是本次实测命令传了 `--max-steps 20`，导致正确订单被强制判 0。另加入 BLOCK 候选反馈：从已观察的酒店/商品中列出满足全部硬约束的候选，避免 agent 反复追问、耗尽步数。测试 288 项通过。
 - 训练零分诊断脚本和规则技能导出：archived baseline/harness 两臂均 `exported=0`，原因是没有任何已识别工具错误；新 Go 三臂也无工具错误。没有用演示技能补足。见 [reports/2026-10-27-zero-score-diagnosis](../reports/2026-10-27-zero-score-diagnosis/)。

@@ -16,7 +16,8 @@
 - 在 1 个 dev 用户 × 2 子任务上完成两轮 P0 smoke：baseline/harness/memory/memory_harness 均 0.0。第二轮 memory_harness 选中精确目标商品“清汤面”，地址、25 分钟、非方便面、支付均满足；但该子任务触发 `max_steps`，官方 evaluator 对过早终止直接返回 0、不调用 judge。已确认全部零分都来自真实 rubric 未满足或 `--max-steps 20` 过早终止，并已强制 `max_steps >= 50`、加入候选反馈。未声称提升。
 - 完成第三轮 50 步 dev smoke（1 用户 × 2 子任务 × 1 trial，三个代码状态）：最高 **0.5**，其中两单为精确目标商品、地址正确、25 分钟、非方便面、已支付；但 baseline 同样拿到 0.5，且 n=1、代码不同，不能归因于任一模块，**未声称提升**。
 - 完成一次完整 dev 配对：11 个 dev 用户 × 前 2 子任务 × 3 臂 × 1 trial，固定源码与 50 步。结果 baseline **0.409**、harness **0.273**、memory_harness **0.182**；配对差值均跨 0，**未显示提升**。每臂每用户仅 1 trial，同一用户已出现 0.0/0.5/1.0 波动，因此不能把负差值解释为机制有害。
-- 296 项测试通过；本地演示与官方固定版本/数据哈希校验通过；四轮 Go 实验累计 1,546 请求、估算约 3.5128 USD；正式测试集评测和 skills/full 五组消融尚未完成（需先做多 trial 方差估计）。
+- 完成提示词/约束隔离实验（8 用户 × 2 子任务 × 2 trials）：关闭提示词后，baseline **0.312**、guards_plain **0.281**、memory_guards_plain **0.281**；配对差值均为 −0.031，95% CI 均跨 0，**未显示约束检查或记忆的收益，也未复现此前的负值**。
+- 299 项测试通过；本地演示与官方固定版本/数据哈希校验通过；五轮 Go 实验累计 3,224 请求、估算约 7.2783 USD；正式测试集评测和 skills/full 五组消融尚未完成（需先把四臂放进同一多 trial 队列）。
 
 **可诚实写的能力关键词**：VitaBench 2.0、LLM Agent、执行前约束检查、结构化偏好记忆、证据引用、离线技能演化、可复现实验、配额/预算控制、Python、pytest。
 
@@ -34,7 +35,8 @@
 - Ran two P0 dev-smoke rounds on 1 user × 2 subtasks: baseline/harness/memory/memory_harness all scored 0.0. In the second round memory_harness selected the exact target item “清汤面” with the correct address, 25-minute delivery, non-instant-noodle tag and paid status, but that subtask hit `max_steps`; upstream returns 0 without invoking the judge for premature termination. Every zero is accounted for by a genuinely unmet rubric or the `--max-steps 20` cap; plans now enforce `max_steps >= 50` and blocked writes receive observed-candidate feedback. No improvement is claimed.
 - Ran a third 50-step dev smoke (1 user × 2 subtasks × 1 trial across three code states): the best score was **0.5**, with two orders matching the exact target item, correct address, 25-minute delivery, no instant-noodle tag and paid status; baseline also scored 0.5, so with n=1 and differing code states this cannot be attributed to any module and **no improvement is claimed**.
 - Ran a complete dev pairing (11 dev users × first 2 subtasks × 3 arms × 1 trial, fixed source and 50 steps): baseline **0.409**, harness **0.273**, memory_harness **0.182**; both paired deltas span zero, so **no improvement is shown**. With one trial per user and observed 0.0/0.5/1.0 swings for the same user, the negative point estimates cannot be read as evidence of harm either.
-- 296 tests pass; pinned version/data checks and local demo pass; the four Go rounds used 1,546 requests (~3.5128 USD estimate); formal held-out evaluation and the skills/full five-variant ablation remain unfinished (multi-trial variance estimation comes first).
+- Ran a prompt/constraint isolation experiment (8 dev users × 2 subtasks × 2 trials): with prompt nudges off, baseline **0.312**, guards_plain **0.281**, memory_guards_plain **0.281**; both paired deltas were −0.031 with 95% CIs spanning zero, so neither constraint checks nor memory show a measurable gain, and the earlier negative estimate did not replicate.
+- 299 tests pass; pinned version/data checks and local demo pass; the five Go rounds used 3,224 requests (~7.2783 USD estimate); formal held-out evaluation and the skills/full five-variant ablation remain unfinished (the four arms must first share one multi-trial cohort).
 
 ## 不应写的内容
 

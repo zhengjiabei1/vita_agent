@@ -14,6 +14,8 @@ P0 修正后又用新增额度跑了 1 个 dev 用户 × 2 子任务 × 三臂�
 
 第四轮完整 dev 配对（新授权 1000 请求）：11 个 dev 用户 × 前 2 子任务 × 3 臂 × 1 trial，固定源码 `9632aa0`、50 步。baseline **0.409**、harness **0.273**、memory_harness **0.182**；配对差值 harness−baseline −0.136（95% CI [−0.409, +0.182]）、memory_harness−baseline −0.227（[−0.500, +0.045]）。无提升证据，点估计为负但区间跨 0；每臂每用户仅 1 trial，同一用户已出现 0.0/0.5/1.0 波动，因此不能据此断言机制有害。ledger 928/1000 请求，估算 2.19887535 USD，剩余 72；四轮累计 1,546 请求、约 3.5128 USD。详见 [reports/2026-10-27-go-dev-full](../reports/2026-10-27-go-dev-full/)。
 
+第五轮提示词/约束隔离（8 用户 × 2 子任务 × 2 trials，固定源码 `65d3066`）：关闭完成前说明与候选列表后，baseline **0.312**、guards_plain **0.281**、memory_guards_plain **0.281**；配对差值均为 **−0.031**，95% CI 分别 [−0.125, +0.062] 与 [−0.250, +0.219]。**约束检查与 baseline 无可检测差异**，上一轮的负点估计未复现。过程中供应商 429 每秒限流被误判为额度耗尽并 halt，已修复为“普通 429 交给上游重试，402/明确 quota 才 halt”。本轮 1,678/1,850 请求、估算 3.76551 USD；五轮累计 3,224 请求、约 7.2783 USD。详见 [reports/2026-10-27-go-dev-plain](../reports/2026-10-27-go-dev-plain/)。
+
 后续新增修复：酒店“浴缸”改为房间级属性；系统提示主动列出候选；候选只有在每个硬约束都有可观察证据时才声称满足（v8 的旧提示曾把未知配送时间写成满足，导致 26 分钟订单）。下一步必须固定源码、用多 trial 估计波动，再扩用户；免费额度阻塞记录见 [reports/2026-10-27-provider-quota](../reports/2026-10-27-provider-quota/)。
 
 默认比较 full-context baseline、full-context + harness、structured memory、full-context + frozen skills、structured memory + harness + frozen skills。结构化记忆的当前轮提取属于记忆模块的处理；baseline 保留官方 full-context 记忆。技能单独收益只用 `skills - baseline`，不能用 `full - baseline` 代替。

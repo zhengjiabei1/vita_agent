@@ -6,7 +6,7 @@
 
 实现 **Training-Free Personalized Service Agent on VitaBench 2.0**：执行前约束检查、带证据的结构化偏好记忆、从训练失败轨迹离线提炼并冻结的技能库。用户已说明简历中的 `0.440 → 0.570`、`+8.6%`、`0.38 → 0.48`、`4.6pp` 是猜测值；它们不是结果，也不应作为调参必须达到的目标。
 
-当前是已有代码、单元测试和小规模真实训练试验的研究原型，**完整实验尚未完成，也没有证实性能提升**。截至 2026-10-27，292 项测试通过（已安装固定官方包，无 skip）；本地模拟演示成功；`ruff --select E4,E7,E9,F` 检查通过。未指定规则的全面 Ruff 检查仍有风格/类型建议，不能称为所有静态规则通过。
+当前是已有代码、单元测试和小规模真实训练试验的研究原型，**完整实验尚未完成，也没有证实性能提升**。截至 2026-10-28，299 项测试通过（已安装固定官方包，无 skip）；本地模拟演示成功；`ruff --select E4,E7,E9,F` 检查通过。未指定规则的全面 Ruff 检查仍有风格/类型建议，不能称为所有静态规则通过。
 
 用户要求换平台/模型继续。此前 DeepSeek 总预算上限是 20 元，随后明确转向免费模型，付费调用已暂停。**不要恢复旧付费调用，不要把此前预算视为新平台的付费授权。** 密钥只通过环境设置提供，不放进聊天、Git、日志或结果文件。旧 `VITA_API_KEY` 绑定 DeepSeek 域名，不能直接拿到新供应商使用。
 
@@ -55,15 +55,31 @@ OpenCode 免费模型 `deepseek-v4.1-flash-free` 的最小预检返回 HTTP 429 
 
 第四轮 ledger：**928/1000 请求**，输入 13,835,361、输出 205,952，估算 **2.19887535 USD**，剩余 72。四轮累计 **1,546 请求**、估算约 **3.5128 USD**。证据见 [完整 dev 对比](reports/2026-10-27-go-dev-full/)。
 
+## 第五轮：提示词/约束隔离（8 用户 × 2 trials）
+
+固定源码 `65d3066`，关闭两种提示词后：
+
+| arm | 8 用户均值 | 配对差值 vs baseline | 95% CI |
+| --- | ---: | ---: | --- |
+| baseline | 0.312 | — | — |
+| guards_plain | 0.281 | −0.031 | [−0.125, +0.062] |
+| memory_guards_plain | 0.281 | −0.031 | [−0.250, +0.219] |
+
+**只加约束检查、以及记忆+检查，都与 baseline 无可检测差异。** 上一轮 `harness` 的负点估计没有复现，更可能来自单 trial 波动和/或提示词；但本轮没有在同一队列重跑 `harness`，不能严格因果归因。
+
+过程中修复了真实 bug：供应商 429 `requests per second` 限流被误判为额度耗尽并永久 halt，导致 10 条轨迹被拒；现改为普通 429 交给上游有界重试，只有 402/明确 quota 才 halt。
+
+本轮两个账本合计 **1,678 / 1,850 请求**，估算 **3.76551 USD**；项目五轮累计 **3,224 请求 / 约 7.2783 USD**。证据见 [隔离实验](reports/2026-10-27-go-dev-plain/)。
+
 ## 下一步
 
 优先解决方差，而不是继续加机制：
 
-1. 固定源码，3 臂 × 3 trials × 若干 dev 用户，先估轨迹波动；n=1 的任何差值都不可用。
-2. 用已加入的隔离开关做提示词消融：`guards_plain`（仅检查）与 `memory_guards_plain`（记忆 + 仅检查），对应环境变量 `VITA_COMPLETION_EVIDENCE`/`VITA_CANDIDATE_HINTS`。开关只影响提示词，不改变检查逻辑；已有单测，尚未在真实模型上运行。
+1. 固定同一队列，把 `baseline / guards_plain / harness / memory_guards_plain` 放在一起跑多 trial，直接估计提示词效应（当前跨队列比较不能下因果结论）。
+2. 扩大用户数或 trials 以缩小置信区间；当前 8 用户 × 2 trials 的 95% CI 仍宽（memory 臂约 ±0.23）。
 3. skills/full 需要真实冻结技能库；测试集只在最后、冻结后运行。
 
-按实测每次请求约 0.0024 USD。建议下一轮：baseline / guards_plain / memory_guards_plain × 11 用户 × 2 trials ≈ 1,850 请求（约 4.4 USD）；如果只做 5 用户 × 3 trials，约 1,260 请求（约 3 USD）。
+按实测每次请求约 0.0023 USD。4 臂 × 8 用户 × 3 trials ≈ 96 条轨迹、约 2,900 请求（约 6.7 USD）。
 
 ## 已完成的实现
 
@@ -145,7 +161,7 @@ Qwen Code 官方文档已注明 OAuth 免费套餐 2026-04-15 停用，不依赖
 
 先读 HANDOFF.md、README.md、docs/verification.md、docs/experiments.md，以及 reports/2026-10-26-train-prefix2/、reports/2026-10-27-zero-score-diagnosis/、reports/2026-10-27-provider-quota/。检查代码和证据，不要从零重写。
 
-简历中的 0.440→0.570、8.6%、0.38→0.48、4.6pp 都是猜测，禁止作为真实结果。当前296项测试通过；已完成新 Go 模型上1个训练用户、2子任务、baseline/harness/memory各1trial（三臂0分），1个dev用户两轮20步smoke（均0分），1个dev用户三轮50步smoke（最高0.5），以及11个dev用户×2子任务×3臂×1trial的完整配对（baseline 0.409、harness 0.273、memory_harness 0.182；配对差值均跨0）。都不是测试集，也未完成 skills/full 和完整消融。四轮累计1546请求、估算约3.5128 USD，剩余72。已确认20步零分是过早终止惩罚（官方直接返回0、不调用judge），现已强制 `max_steps >= 50`。下一步固定源码，用多trial dev对比估计波动，并把提示词开关与约束检查分开消融，再跑 skills/full 和保留测试。
+简历中的 0.440→0.570、8.6%、0.38→0.48、4.6pp 都是猜测，禁止作为真实结果。当前299项测试通过；已完成新 Go 模型上1个训练用户、2子任务（三臂0分），1个dev用户两轮20步smoke（均0分），1个dev用户三轮50步smoke（最高0.5），11个dev用户×3臂×1trial的完整配对（baseline 0.409、harness 0.273、memory_harness 0.182），以及8个dev用户×2trials的提示词隔离（baseline 0.312、guards_plain 0.281、memory_guards_plain 0.281；差值均跨0）。都不是测试集，也未完成 skills/full 和完整消融。五轮累计3224请求、估算约7.2783 USD。已确认20步零分是过早终止惩罚（官方直接返回0、不调用judge），现已强制 `max_steps >= 50`；429 限流不再被误判为额度耗尽。下一步把 baseline/guards_plain/harness/memory_guards_plain 放进同一多trial队列，再跑 skills/full 和保留测试。
 
 我要换平台/模型继续，优先免费API；旧DeepSeek付费调用已停止。先完成本地工作，再通过环境密钥设置获取实际需要的凭据，不能让我在聊天里贴Key，也不能未经授权产生费用。
 
